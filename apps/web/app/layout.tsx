@@ -3,6 +3,7 @@ import { Oswald } from 'next/font/google';
 import { ToastProvider } from '@/src/components/providers/ToastProvider';
 import { I18nProvider } from '@/src/components/providers/I18nProvider';
 import { AiFooterProvider } from '@/src/components/providers/AiFooterProvider';
+import { AuthProvider } from '@/src/components/providers/AuthProvider';
 import './globals.css';
 
 const oswald = Oswald({
@@ -30,6 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={oswald.variable}>
       <body className="min-h-screen bg-bg-primary font-body text-text-primary antialiased">
         <I18nProvider />
+        <AuthProvider />
         {children}
         <AiFooterProvider />
         <ToastProvider />

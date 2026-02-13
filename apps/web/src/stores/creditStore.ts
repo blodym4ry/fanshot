@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { createClient, isSupabaseConfigured } from '@/src/lib/supabase';
 
 export interface CreditState {
   credits: number;
@@ -20,7 +21,7 @@ export const useCreditStore = create<CreditState>((set, get) => ({
   addCredits: (amount: number) =>
     set((s) => ({ credits: s.credits + amount })),
 
-  /** Spend 1 credit. Returns true if successful, false if insufficient. */
+  /** Spend 1 credit locally. Returns true if successful. */
   spendCredit: () => {
     const { credits } = get();
     if (credits <= 0) return false;
@@ -28,19 +29,37 @@ export const useCreditStore = create<CreditState>((set, get) => ({
     return true;
   },
 
-  /** Fetch credits from Supabase. Falls back to mock (1) if offline. */
+  /** Fetch credits from Supabase. Falls back to local default if offline. */
   fetchCredits: async () => {
     set({ isLoading: true });
     try {
-      // TODO: fetch from Supabase when connected
-      // const { data } = await supabase
-      //   .from('users')
-      //   .select('free_credits, paid_credits')
-      //   .single();
-      // set({ credits: (data?.free_credits ?? 0) + (data?.paid_credits ?? 0) });
+      if (!isSupabaseConfigured) {
+        await new Promise((r) => setTimeout(r, 300));
+        return;
+      }
 
-      // Mock: keep current credits (default 1)
-      await new Promise((r) => setTimeout(r, 300));
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        set({ credits: 0 });
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('users')
+        .select('free_credits, paid_credits')
+        .eq('id', user.id)
+        .single();
+
+      if (error) {
+        console.error('[Credits] Fetch error:', error.message);
+        return;
+      }
+
+      if (data) {
+        set({ credits: (data.free_credits ?? 0) + (data.paid_credits ?? 0) });
+      }
     } catch {
       // offline — keep default
     } finally {
