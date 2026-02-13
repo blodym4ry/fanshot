@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "FanShot",
+    "slug": "fanshot",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "fanshot",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#4263eb"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.fanshot.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#4263eb"
+      },
+      "package": "com.fanshot.app"
+    },
+    "plugins": ["expo-router"]
+  }
+}
