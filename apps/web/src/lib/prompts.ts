@@ -1,27 +1,11 @@
 /**
- * FanShot Prompt Engine v2
+ * FanShot Prompt Engine v3
  *
- * Completely rewritten for authentic "fan meets footballer" selfie feel.
- * Optimized for FLUX Kontext Pro (fal-ai/flux-pro/kontext).
- *
- * Two photo types:
- *   - SELFIE scenes: fan holds phone, front-camera angle
- *   - THIRD-PERSON scenes: friend/bystander takes the photo
+ * Simplified: no manual user details form.
+ * FLUX Kontext Pro sees the selfie via image_url and preserves the face.
+ * [USER_DESC] = "the person shown in the reference photo"
+ * Face preservation instruction added to PHOTO_SUFFIX.
  */
-
-/* ─── User Details (physical appearance) ─────────────── */
-
-export interface UserDetails {
-  gender: 'male' | 'female' | null;
-  ageRange: string | null;
-  height: string | null;
-  bodyType: string | null;
-  hairColor: string | null;
-  hairStyle: string | null;
-  facialHair: string | null;
-  glasses: boolean;
-  clothing: string | null;
-}
 
 /* ─── Photo type prefixes ─────────────────────────────── */
 
@@ -32,7 +16,11 @@ const THIRD_PERSON_PREFIX =
   'Authentic smartphone photograph taken by a friend or bystander. Shot with rear camera, natural framing, the photographer is standing 1.5-2 meters away. Slightly candid feel, not perfectly composed. Natural available light, no flash. ';
 
 const PHOTO_SUFFIX =
-  ' This must look identical to a real photograph posted on social media. NOT a render, NOT AI art, NOT a professional photoshoot. Real camera sensor noise at high ISO, natural depth of field, authentic color grading from smartphone processing. Realistic skin with pores, natural under-eye shadows, authentic fabric wrinkles on clothing. No extra fingers, perfect human anatomy, natural proportions.';
+  ' This must look identical to a real photograph posted on social media. NOT a render, NOT AI art, NOT a professional photoshoot. Real camera sensor noise at high ISO, natural depth of field, authentic color grading from smartphone processing. Realistic skin with pores, natural under-eye shadows, authentic fabric wrinkles on clothing. No extra fingers, perfect human anatomy, natural proportions. CRITICAL: The fan in this image must be the EXACT same person as shown in the reference/input image. Preserve their face, skin tone, hair color, hair style, facial hair, and all distinguishing features with 100% accuracy. Do not alter their appearance in any way.';
+
+/* ─── User description (auto from reference image) ──── */
+
+const USER_DESC = 'the person shown in the reference photo';
 
 /* ─── Scene type: selfie vs third-person ──────────────── */
 
@@ -43,9 +31,6 @@ const SELFIE_SCENES = new Set([
   'airport_arrival',
   'warmup_pitch',
 ]);
-
-// third-person scenes: mixed_zone, training_ground, stadium_exit,
-// celebration_moment, autograph_line
 
 /* ─── Jersey color descriptions by country ────────────── */
 
@@ -144,109 +129,6 @@ const sceneTemplates: Record<string, string> = {
     '[USER_DESC] taking a selfie with [PLAYER_NAME], the famous [COUNTRY] international footballer, at an airport. [PLAYER_NAME] in smart casual travel clothing — designer jacket, comfortable pants, sunglasses pushed up on head, pulling carry-on luggage. Has stopped briefly in the terminal for this fan photo. [PLAYER_NAME] gives a quick, friendly smile. [USER_DESC] is clearly excited. Airport terminal background with departure boards, other travelers, bright terminal lighting. A quick, lucky airport encounter selfie.',
 };
 
-/* ─── Build user description from details ─────────────── */
-
-function buildUserDescription(details?: UserDetails | null): string {
-  if (!details) return 'a fan';
-
-  const parts: string[] = [];
-
-  // age
-  if (details.ageRange) {
-    const ageMap: Record<string, string> = {
-      '18-25': 'a young',
-      '26-35': 'a',
-      '36-45': 'a middle-aged',
-      '46-55': 'a middle-aged',
-      '55+': 'an older',
-    };
-    parts.push(ageMap[details.ageRange] || 'a');
-  } else {
-    parts.push('a');
-  }
-
-  // gender
-  if (details.gender === 'male') parts.push('man');
-  else if (details.gender === 'female') parts.push('woman');
-  else parts.push('fan');
-
-  // height + body
-  const physicals: string[] = [];
-  if (details.height) {
-    const heightMap: Record<string, string> = {
-      short: 'short',
-      medium: 'medium height',
-      tall: 'tall',
-      very_tall: 'very tall',
-    };
-    physicals.push(heightMap[details.height] || '');
-  }
-  if (details.bodyType) {
-    const bodyMap: Record<string, string> = {
-      slim: 'slim build',
-      normal: 'average build',
-      large: 'stocky build',
-    };
-    physicals.push(bodyMap[details.bodyType] || '');
-  }
-  if (physicals.filter(Boolean).length > 0) {
-    parts.push('with ' + physicals.filter(Boolean).join(', '));
-  }
-
-  // hair
-  const hairParts: string[] = [];
-  if (details.hairStyle === 'bald' || details.hairColor === 'bald') {
-    hairParts.push('bald head');
-  } else {
-    if (details.hairStyle) {
-      const styleMap: Record<string, string> = {
-        short: 'short',
-        medium: 'medium-length',
-        long: 'long',
-        bun: 'tied-up',
-      };
-      hairParts.push(styleMap[details.hairStyle] || '');
-    }
-    if (details.hairColor && details.hairColor !== 'bald') {
-      const colorMap: Record<string, string> = {
-        black: 'black',
-        brown: 'brown',
-        blonde: 'blonde',
-        red: 'red',
-        gray: 'gray',
-      };
-      hairParts.push(colorMap[details.hairColor] || '');
-    }
-    if (hairParts.filter(Boolean).length > 0) {
-      parts.push(hairParts.filter(Boolean).join(' ') + ' hair');
-    }
-  }
-
-  // facial hair (male only)
-  if (details.gender === 'male' && details.facialHair && details.facialHair !== 'none') {
-    const beardMap: Record<string, string> = {
-      light: 'light stubble',
-      beard: 'full beard',
-      long_beard: 'long thick beard',
-    };
-    if (beardMap[details.facialHair]) {
-      parts.push('with ' + beardMap[details.facialHair]);
-    }
-  }
-
-  // glasses
-  if (details.glasses) {
-    parts.push('wearing glasses');
-  }
-
-  // clothing
-  if (details.clothing && details.clothing.trim()) {
-    parts.push('dressed in ' + details.clothing.trim());
-  }
-
-  return parts.join(', ').replace(/, , /g, ', ').replace(/^a, /, 'a ');
-}
-
 /* ─── Public API ──────────────────────────────────────── */
 
 export interface PlayerPromptData {
@@ -258,8 +140,7 @@ export interface PlayerPromptData {
 
 export function buildPrompt(
   scene: string,
-  player: PlayerPromptData,
-  userDetails?: UserDetails | null
+  player: PlayerPromptData
 ): string {
   const template = sceneTemplates[scene];
   if (!template) {
@@ -273,9 +154,6 @@ export function buildPrompt(
     JERSEY_COLORS[playerCountry] ||
     `${player.teamColors[0]} and ${player.teamColors[1]}`;
 
-  // Build user description
-  const userDesc = buildUserDescription(userDetails);
-
   // Select prefix based on scene type
   const prefix = SELFIE_SCENES.has(scene)
     ? SELFIE_PREFIX
@@ -283,7 +161,7 @@ export function buildPrompt(
 
   // Replace placeholders
   const filled = template
-    .replace(/\[USER_DESC\]/g, userDesc)
+    .replace(/\[USER_DESC\]/g, USER_DESC)
     .replace(/\[PLAYER_NAME\]/g, playerName)
     .replace(/\[COUNTRY\]/g, playerCountry)
     .replace(/\[TEAM_COLORS\]/g, jerseyDesc);

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fal } from '@fal-ai/client';
 import { buildPrompt } from '@/src/lib/prompts';
-import type { UserDetails } from '@/src/lib/prompts';
 
 /* ─── Mock placeholder for when FAL_API_KEY is missing ── */
 
@@ -18,7 +17,6 @@ interface GenerateRequest {
   playerCountry: string;
   playerNumber: number;
   teamColors: [string, string];
-  userDetails?: UserDetails | null;
 }
 
 interface FalKontextResult {
@@ -58,8 +56,7 @@ export async function POST(req: NextRequest) {
           playerCountry: playerCountry || 'International',
           playerNumber: playerNumber || 10,
           teamColors: teamColors || ['#FFFFFF', '#000000'],
-        },
-        body.userDetails
+        }
       );
     } catch (e) {
       return NextResponse.json(

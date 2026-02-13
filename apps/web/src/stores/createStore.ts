@@ -1,28 +1,12 @@
 import { create } from 'zustand';
 import type { Player } from '@/src/data/players';
-import type { UserDetails } from '@/src/lib/prompts';
 
 export type GenerationStatus = 'idle' | 'loading' | 'success' | 'error';
-
-const DEFAULT_USER_DETAILS: UserDetails = {
-  gender: null,
-  ageRange: null,
-  height: null,
-  bodyType: null,
-  hairColor: null,
-  hairStyle: null,
-  facialHair: null,
-  glasses: false,
-  clothing: null,
-};
 
 export interface CreateState {
   /* selfies (1-5 photos) */
   selfieFiles: File[];
   selfiePreviews: string[];
-
-  /* user physical details */
-  userDetails: UserDetails;
 
   /* player */
   selectedPlayer: Player | null;
@@ -41,10 +25,6 @@ export interface CreateState {
   addSelfie: (file: File) => void;
   removeSelfie: (index: number) => void;
   clearSelfies: () => void;
-
-  /* actions – user details */
-  setUserDetail: <K extends keyof UserDetails>(key: K, value: UserDetails[K]) => void;
-  resetUserDetails: () => void;
 
   /* actions – selections */
   setPlayer: (player: Player) => void;
@@ -66,7 +46,6 @@ const MAX_SELFIES = 5;
 export const useCreateStore = create<CreateState>((set, get) => ({
   selfieFiles: [],
   selfiePreviews: [],
-  userDetails: { ...DEFAULT_USER_DETAILS },
   selectedPlayer: null,
   selectedScene: 'tunnel_encounter',
   generationStatus: 'idle',
@@ -100,16 +79,6 @@ export const useCreateStore = create<CreateState>((set, get) => ({
     selfiePreviews.forEach((url) => URL.revokeObjectURL(url));
     set({ selfieFiles: [], selfiePreviews: [] });
   },
-
-  /* ── User details actions ──────────────────────── */
-
-  setUserDetail: (key, value) => {
-    set((state) => ({
-      userDetails: { ...state.userDetails, [key]: value },
-    }));
-  },
-
-  resetUserDetails: () => set({ userDetails: { ...DEFAULT_USER_DETAILS } }),
 
   /* ── Selection actions ───────────────────────── */
 
@@ -156,7 +125,6 @@ export const useCreateStore = create<CreateState>((set, get) => ({
     set({
       selfieFiles: [],
       selfiePreviews: [],
-      userDetails: { ...DEFAULT_USER_DETAILS },
       selectedPlayer: null,
       selectedScene: 'tunnel_encounter',
       generationStatus: 'idle',

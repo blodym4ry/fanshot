@@ -88,31 +88,6 @@ function groupByCountry(allPlayers: Player[]): Map<string, Player[]> {
   return map;
 }
 
-/* ─── Pill / Toggle button component ──────────── */
-
-function PillButton({
-  label,
-  isActive,
-  onClick,
-}: {
-  label: string;
-  isActive: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-all duration-150 ${
-        isActive
-          ? 'border-gold/50 bg-gold/15 text-gold'
-          : 'border-white/[0.08] bg-bg-card text-text-muted hover:border-white/[0.15] hover:text-text-secondary'
-      }`}
-    >
-      {label}
-    </button>
-  );
-}
-
 /* ═══ MAIN COMPONENT ═══════════════════════════ */
 
 export function CreateFlow() {
@@ -123,14 +98,12 @@ export function CreateFlow() {
   const {
     selfieFiles,
     selfiePreviews,
-    userDetails,
     selectedPlayer,
     selectedScene,
     generationStatus,
     addSelfie,
     removeSelfie,
     clearSelfies,
-    setUserDetail,
     setPlayer,
     setScene,
     startGeneration,
@@ -236,7 +209,6 @@ export function CreateFlow() {
           playerCountry: selectedPlayer.country,
           playerNumber: selectedPlayer.number,
           teamColors: selectedPlayer.teamColors,
-          userDetails,
         }),
       });
       const data = await res.json();
@@ -245,7 +217,7 @@ export function CreateFlow() {
     } catch {
       setError(t('errorConnection'));
     }
-  }, [selfieFiles, selectedPlayer, selectedScene, userDetails, startGeneration, setResult, setError, spendCredit, credits, t]);
+  }, [selfieFiles, selectedPlayer, selectedScene, startGeneration, setResult, setError, spendCredit, credits, t]);
 
   const canGenerate = hasSelfies && selectedPlayer && aiChecked && hasCredits;
 
@@ -320,138 +292,6 @@ export function CreateFlow() {
             </div>
           </button>
         )}
-      </section>
-
-      {/* ═══ SECTION 1.5: USER DETAILS FORM ═══════ */}
-      <section>
-        <h3 className="mb-1.5 font-oswald text-xs font-semibold uppercase tracking-[0.2em] text-text-muted">
-          👤 {t('userDetailsTitle')}
-        </h3>
-        <p className="mb-3 text-[10px] text-gold/60">{t('userDetailsTip')}</p>
-
-        <div className="space-y-2.5 rounded-xl border border-white/[0.06] bg-bg-card px-3 py-3">
-
-          {/* Gender */}
-          <div className="flex items-center gap-2">
-            <span className="w-14 text-[10px] font-medium text-text-muted">{t('gender')}</span>
-            <div className="flex gap-1.5">
-              <PillButton label={t('male')} isActive={userDetails.gender === 'male'} onClick={() => setUserDetail('gender', userDetails.gender === 'male' ? null : 'male')} />
-              <PillButton label={t('female')} isActive={userDetails.gender === 'female'} onClick={() => setUserDetail('gender', userDetails.gender === 'female' ? null : 'female')} />
-            </div>
-          </div>
-
-          {/* Age Range */}
-          <div className="flex items-center gap-2">
-            <span className="w-14 text-[10px] font-medium text-text-muted">{t('age')}</span>
-            <div className="flex flex-wrap gap-1.5">
-              {['18-25', '26-35', '36-45', '46-55', '55+'].map((age) => (
-                <PillButton key={age} label={age} isActive={userDetails.ageRange === age} onClick={() => setUserDetail('ageRange', userDetails.ageRange === age ? null : age)} />
-              ))}
-            </div>
-          </div>
-
-          {/* Height */}
-          <div className="flex items-center gap-2">
-            <span className="w-14 text-[10px] font-medium text-text-muted">{t('height')}</span>
-            <div className="flex flex-wrap gap-1.5">
-              {([
-                { key: 'short', label: t('heightShort') },
-                { key: 'medium', label: t('heightMedium') },
-                { key: 'tall', label: t('heightTall') },
-                { key: 'very_tall', label: t('heightVeryTall') },
-              ] as const).map((h) => (
-                <PillButton key={h.key} label={h.label} isActive={userDetails.height === h.key} onClick={() => setUserDetail('height', userDetails.height === h.key ? null : h.key)} />
-              ))}
-            </div>
-          </div>
-
-          {/* Body Type */}
-          <div className="flex items-center gap-2">
-            <span className="w-14 text-[10px] font-medium text-text-muted">{t('body')}</span>
-            <div className="flex gap-1.5">
-              {([
-                { key: 'slim', label: t('bodySlim') },
-                { key: 'normal', label: t('bodyNormal') },
-                { key: 'large', label: t('bodyLarge') },
-              ] as const).map((b) => (
-                <PillButton key={b.key} label={b.label} isActive={userDetails.bodyType === b.key} onClick={() => setUserDetail('bodyType', userDetails.bodyType === b.key ? null : b.key)} />
-              ))}
-            </div>
-          </div>
-
-          {/* Hair Color */}
-          <div className="flex items-center gap-2">
-            <span className="w-14 text-[10px] font-medium text-text-muted">{t('hairColor')}</span>
-            <div className="flex flex-wrap gap-1.5">
-              {([
-                { key: 'black', label: t('hairBlack') },
-                { key: 'brown', label: t('hairBrown') },
-                { key: 'blonde', label: t('hairBlonde') },
-                { key: 'red', label: t('hairRed') },
-                { key: 'gray', label: t('hairGray') },
-                { key: 'bald', label: t('hairBald') },
-              ] as const).map((hc) => (
-                <PillButton key={hc.key} label={hc.label} isActive={userDetails.hairColor === hc.key} onClick={() => setUserDetail('hairColor', userDetails.hairColor === hc.key ? null : hc.key)} />
-              ))}
-            </div>
-          </div>
-
-          {/* Hair Style (hidden if bald) */}
-          {userDetails.hairColor !== 'bald' && (
-            <div className="flex items-center gap-2">
-              <span className="w-14 text-[10px] font-medium text-text-muted">{t('hairStyle')}</span>
-              <div className="flex flex-wrap gap-1.5">
-                {([
-                  { key: 'short', label: t('styleShort') },
-                  { key: 'medium', label: t('styleMedium') },
-                  { key: 'long', label: t('styleLong') },
-                  { key: 'bun', label: t('styleBun') },
-                ] as const).map((hs) => (
-                  <PillButton key={hs.key} label={hs.label} isActive={userDetails.hairStyle === hs.key} onClick={() => setUserDetail('hairStyle', userDetails.hairStyle === hs.key ? null : hs.key)} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Facial Hair (male only) */}
-          {userDetails.gender === 'male' && (
-            <div className="flex items-center gap-2">
-              <span className="w-14 text-[10px] font-medium text-text-muted">{t('beard')}</span>
-              <div className="flex flex-wrap gap-1.5">
-                {([
-                  { key: 'none', label: t('beardNone') },
-                  { key: 'light', label: t('beardLight') },
-                  { key: 'beard', label: t('beardFull') },
-                  { key: 'long_beard', label: t('beardLong') },
-                ] as const).map((fb) => (
-                  <PillButton key={fb.key} label={fb.label} isActive={userDetails.facialHair === fb.key} onClick={() => setUserDetail('facialHair', userDetails.facialHair === fb.key ? null : fb.key)} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Glasses */}
-          <div className="flex items-center gap-2">
-            <span className="w-14 text-[10px] font-medium text-text-muted">{t('glasses')}</span>
-            <PillButton
-              label={userDetails.glasses ? t('glassesYes') : t('glassesNo')}
-              isActive={userDetails.glasses}
-              onClick={() => setUserDetail('glasses', !userDetails.glasses)}
-            />
-          </div>
-
-          {/* Clothing */}
-          <div className="flex items-center gap-2">
-            <span className="w-14 flex-shrink-0 text-[10px] font-medium text-text-muted">{t('clothing')}</span>
-            <input
-              type="text"
-              placeholder={t('clothingPlaceholder')}
-              value={userDetails.clothing || ''}
-              onChange={(e) => setUserDetail('clothing', e.target.value || null)}
-              className="flex-1 rounded-lg border border-white/[0.08] bg-bg-primary px-2.5 py-1.5 text-[11px] text-text-primary placeholder-text-muted/50 outline-none transition-colors focus:border-gold/30"
-            />
-          </div>
-        </div>
       </section>
 
       {/* ═══ SECTION 2: PLAYER SELECT ════════════ */}
