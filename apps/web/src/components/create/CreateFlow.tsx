@@ -11,6 +11,7 @@ import { ResultScreen } from './ResultScreen';
 import { ErrorScreen } from './ErrorScreen';
 import { GoldButton } from '../ui/GoldButton';
 import { useT } from '@/src/lib/i18n';
+import { compressImages } from '@/src/lib/imageUtils';
 import { players, countries, type Player, type CountryFilter } from '@/src/data/players';
 
 /* ─── Scene data with gradient colors ─────────── */
@@ -35,15 +36,6 @@ const POPULAR_IDS = [
 ];
 
 /* ─── Helpers ─────────────────────────────────── */
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
 
 function useDebounce(value: string, delay: number) {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -197,7 +189,9 @@ export function CreateFlow() {
     setAiChecked(false);
     startGeneration(isFree);
     try {
-      const selfieBase64Array = await Promise.all(selfieFiles.map(fileToBase64));
+      // Compress images client-side: max 1024px, quality 0.8 → ~200-500KB each
+      // This prevents Vercel's 4.5MB body limit (FUNCTION_PAYLOAD_TOO_LARGE)
+      const selfieBase64Array = await compressImages(selfieFiles, 1024, 0.8);
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

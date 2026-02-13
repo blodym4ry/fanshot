@@ -77,8 +77,28 @@ export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
   try {
+    /* ── Body size guard (Vercel limit: 4.5MB) ──────────── */
+    const contentLength = parseInt(req.headers.get('content-length') || '0', 10);
+    if (contentLength > 4 * 1024 * 1024) {
+      console.error('[FanShot] ❌ Request body too large:', (contentLength / 1024 / 1024).toFixed(1) + 'MB');
+      return NextResponse.json(
+        { error: 'Photo is too large. Please try a smaller photo or enable compression.' },
+        { status: 413 }
+      );
+    }
+
     const body = (await req.json()) as GenerateRequest;
     const { selfieBase64, scene, playerName, playerCountry, playerNumber, teamColors, playerPhotoUrl } = body;
+
+    /* ── Validate base64 size (double check after parsing) ── */
+    const base64Size = selfieBase64 ? selfieBase64.length : 0;
+    if (base64Size > 3 * 1024 * 1024) {
+      console.error('[FanShot] ❌ Selfie base64 too large:', (base64Size / 1024 / 1024).toFixed(1) + 'MB');
+      return NextResponse.json(
+        { error: 'Photo is too large after encoding. Please use a smaller photo (max ~2MB).' },
+        { status: 413 }
+      );
+    }
 
     /* Validate required fields */
     if (!selfieBase64 || !scene || !playerName) {
