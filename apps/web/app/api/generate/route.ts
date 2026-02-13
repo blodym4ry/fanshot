@@ -12,7 +12,6 @@ const MOCK_IMAGE_URL =
 /* ─── Helper: convert base64 data URI to Blob (Node.js) ── */
 
 function base64ToBlob(base64DataUri: string): Blob {
-  // Extract MIME type and raw base64
   const matches = base64DataUri.match(/^data:(.+?);base64,(.+)$/);
   if (!matches) {
     throw new Error('Invalid base64 data URI format');
@@ -38,11 +37,9 @@ async function uploadToFalStorage(
   let blob: Blob;
 
   if (imageSource.startsWith('data:')) {
-    // base64 data URI → Blob
     blob = base64ToBlob(imageSource);
     console.log(`[FanShot]    Source: base64 data URI (${(blob.size / 1024).toFixed(0)}KB)`);
   } else {
-    // Remote URL → fetch → Blob
     console.log(`[FanShot]    Source: remote URL → ${imageSource.slice(0, 80)}...`);
     const response = await fetch(imageSource);
     if (!response.ok) {
@@ -85,7 +82,7 @@ interface FalKontextResult {
 }
 
 /* ─── Estimated cost per generation ──────────────────────── */
-const ESTIMATED_COST_USD = 0.08; // Kontext Max Multi costs more
+const ESTIMATED_COST_USD = 0.06; // Kontext Max single-image
 
 /* ─── Helper: get auth user from request ────────────────── */
 
@@ -93,12 +90,10 @@ async function getAuthUser(req: NextRequest): Promise<string | null> {
   if (!isAdminConfigured) return null;
 
   try {
-    // Read the Supabase auth token from cookie or header
     const authHeader = req.headers.get('authorization');
     const token = authHeader?.replace('Bearer ', '');
 
     if (!token) {
-      // Try to get from cookie (SSR auth)
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
       const projectRef = supabaseUrl.match(/https:\/\/(.+)\.supabase\.co/)?.[1] || '';
       const cookieName = `sb-${projectRef}-auth-token`;
@@ -143,7 +138,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = (await req.json()) as GenerateRequest;
-    const { selfieBase64, scene, playerName, playerCountry, playerNumber, teamColors, playerPhotoUrl } = body;
+    const { selfieBase64, scene, playerName, playerCountry, playerNumber, teamColors } = body;
 
     /* ── Validate base64 size (double check after parsing) ── */
     const base64Size = selfieBase64 ? selfieBase64.length : 0;
@@ -166,10 +161,7 @@ export async function POST(req: NextRequest) {
     /* Get authenticated user (may be null in dev mode) */
     const userId = await getAuthUser(req);
 
-    /* Determine if dual-image mode is available */
-    const hasDualImages = !!playerPhotoUrl;
-
-    /* Build prompt */
+    /* ── Build prompt (single-image mode — no player photo) ── */
     let prompt: string;
     try {
       prompt = buildPrompt(
@@ -180,7 +172,7 @@ export async function POST(req: NextRequest) {
           playerNumber: playerNumber || 10,
           teamColors: teamColors || ['#FFFFFF', '#000000'],
         },
-        hasDualImages
+        false // single-image mode: player described textually in prompt
       );
     } catch (e) {
       return NextResponse.json(
@@ -197,16 +189,14 @@ export async function POST(req: NextRequest) {
       try {
         selfiePath = await uploadSelfie(userId, selfieBase64);
         if (selfiePath) {
-          // Create a signed URL for fal.ai to access the selfie
           const admin = createAdminClient();
           const { data } = await admin.storage
             .from('selfies')
-            .createSignedUrl(selfiePath, 600); // 10 min expiry for AI processing
+            .createSignedUrl(selfiePath, 600);
           selfieStorageUrl = data?.signedUrl || null;
         }
       } catch (storageErr) {
-        console.warn('[FanShot] Selfie upload failed, falling back to base64:', storageErr);
-        // Continue without storage - will use base64 directly
+        console.warn('[FanShot] Selfie upload to Supabase failed:', storageErr);
       }
     }
 
@@ -227,7 +217,7 @@ export async function POST(req: NextRequest) {
             player_style: playerName,
             prompt_used: prompt.slice(0, 2000),
             status: 'processing',
-            is_free: false, // will be updated by spend_credit()
+            is_free: false,
           })
           .select('id')
           .single();
@@ -248,17 +238,15 @@ export async function POST(req: NextRequest) {
     if (!falApiKey) {
       console.log('──────────────────────────────────────────');
       console.log('[FanShot] ⚠️  No FAL_API_KEY — MOCK MODE');
-      console.log('[FanShot] Mode:', hasDualImages ? 'DUAL-IMAGE' : 'SINGLE-IMAGE');
+      console.log('[FanShot] Mode: SINGLE-IMAGE (selfie only)');
       console.log('[FanShot] Prompt:', prompt.slice(0, 150), '...');
       console.log('[FanShot] Scene:', scene);
       console.log('[FanShot] Player:', playerName);
-      console.log('[FanShot] Player Photo:', playerPhotoUrl ? 'YES' : 'NO');
       console.log('[FanShot] User ID:', userId || 'anonymous');
       console.log('──────────────────────────────────────────');
 
       await new Promise((r) => setTimeout(r, 2500));
 
-      // Update generation record to completed (mock)
       if (generationId && userId && isAdminConfigured) {
         const admin = createAdminClient();
         await admin
@@ -270,7 +258,6 @@ export async function POST(req: NextRequest) {
           })
           .eq('id', generationId);
 
-        // Spend credit via DB function
         await admin.rpc('spend_credit', {
           p_user_id: userId,
           p_generation_id: generationId,
@@ -283,16 +270,15 @@ export async function POST(req: NextRequest) {
         prompt,
         processingTime: Date.now() - startTime,
         mock: true,
-        dualImage: hasDualImages,
+        dualImage: false,
       });
     }
 
     /* ── Configure fal.ai client ──────────────────────────── */
     fal.config({ credentials: falApiKey });
 
-    /* ── Upload selfie to fal.ai storage ───────────────── */
-    /* fal.ai Kontext models need proper URLs, not base64 data URIs.
-       We upload the selfie to fal.ai's own storage and use the returned URL. */
+    /* ── Upload selfie to fal.ai storage ─────────────────── */
+    /* fal.ai Kontext models need proper URLs, not base64 data URIs. */
 
     const selfieDataUri = selfieBase64.startsWith('data:')
       ? selfieBase64
@@ -303,7 +289,6 @@ export async function POST(req: NextRequest) {
       selfieFalUrl = await uploadToFalStorage(selfieDataUri, 'selfie');
     } catch (uploadErr) {
       console.error('[FanShot] ❌ Selfie upload to fal.ai storage failed:', uploadErr);
-      // Fallback: try Supabase signed URL if available
       if (selfieStorageUrl) {
         console.log('[FanShot] ↩️  Falling back to Supabase signed URL');
         selfieFalUrl = selfieStorageUrl;
@@ -315,69 +300,37 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    /* ── Upload player photo to fal.ai storage if needed ── */
-    let playerFalUrl: string | null = null;
-    if (hasDualImages && playerPhotoUrl) {
-      try {
-        playerFalUrl = await uploadToFalStorage(playerPhotoUrl, 'player-photo');
-      } catch (playerUploadErr) {
-        console.warn('[FanShot] ⚠️  Player photo upload to fal.ai storage failed:', playerUploadErr);
-        console.log('[FanShot] ↩️  Trying direct player photo URL as fallback...');
-        // Try using the direct URL as-is (works for some sources)
-        playerFalUrl = playerPhotoUrl;
-      }
-    }
-
-    /* ── Build image_urls array for Kontext Max Multi ────── */
-    const imageUrls: string[] = [selfieFalUrl];
-    if (hasDualImages && playerFalUrl) {
-      imageUrls.push(playerFalUrl);
-    }
-
-    /* ── Select model based on mode ─────────────────────── */
-    const modelId = hasDualImages
-      ? 'fal-ai/flux-pro/kontext/max/multi'
-      : 'fal-ai/flux-pro/kontext/max';
+    /* ── Single-image mode: fal-ai/flux-pro/kontext/max ──── */
+    /* The footballer is described textually in the prompt.
+       FLUX Kontext Max recognizes famous footballers by name.
+       No need for a second reference image. */
+    const modelId = 'fal-ai/flux-pro/kontext/max';
 
     /* ── Logging ───────────────────────────────────────────── */
     console.log('══════════════════════════════════════════');
     console.log('[FanShot] 🎯 Starting AI Generation');
     console.log('[FanShot] Model:', modelId);
-    console.log('[FanShot] Mode:', hasDualImages ? 'DUAL-IMAGE (selfie + player photo)' : 'SINGLE-IMAGE (selfie only)');
+    console.log('[FanShot] Mode: SINGLE-IMAGE (selfie + textual player description)');
     console.log('[FanShot] Scene:', scene);
     console.log('[FanShot] Player:', playerName, '(' + (playerCountry || 'N/A') + ')');
-    console.log('[FanShot] Player Photo URL:', playerPhotoUrl ? playerPhotoUrl.slice(0, 80) + '...' : 'N/A');
     console.log('[FanShot] Selfie fal URL:', selfieFalUrl.slice(0, 80) + '...');
-    console.log('[FanShot] Player fal URL:', playerFalUrl ? playerFalUrl.slice(0, 80) + '...' : 'N/A');
     console.log('[FanShot] User ID:', userId || 'anonymous');
     console.log('[FanShot] Generation ID:', generationId || 'N/A');
-    console.log('[FanShot] Image count:', imageUrls.length);
-    console.log('[FanShot] Prompt (first 200 chars):', prompt.slice(0, 200), '...');
+    console.log('[FanShot] Prompt (first 250 chars):', prompt.slice(0, 250), '...');
     console.log('[FanShot] Estimated cost: ~$' + ESTIMATED_COST_USD.toFixed(2));
     console.log('══════════════════════════════════════════');
 
-    /* ── Real fal.ai API call via @fal-ai/client ──────────── */
+    /* ── fal.ai API call ───────────────────────────────────── */
     try {
-      /* Build fal.ai input based on mode */
-      const falInput = hasDualImages
-        ? {
-            prompt,
-            image_urls: imageUrls,
-            guidance_scale: 4,
-            output_format: 'jpeg' as const,
-            num_images: 1,
-            safety_tolerance: '5' as const,
-            aspect_ratio: '3:4' as const,
-          }
-        : {
-            prompt,
-            image_url: selfieFalUrl,
-            guidance_scale: 3.5,
-            output_format: 'jpeg' as const,
-            num_images: 1,
-            safety_tolerance: '5' as const,
-            aspect_ratio: '3:4' as const,
-          };
+      const falInput = {
+        prompt,
+        image_url: selfieFalUrl,
+        guidance_scale: 3.5,
+        output_format: 'jpeg' as const,
+        num_images: 1,
+        safety_tolerance: '5' as const,
+        aspect_ratio: '3:4' as const,
+      };
 
       const result = await Promise.race([
         fal.subscribe(modelId, {
@@ -392,7 +345,7 @@ export async function POST(req: NextRequest) {
           },
         }),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('TIMEOUT')), 120_000) // 2 min for Kontext Max
+          setTimeout(() => reject(new Error('TIMEOUT')), 120_000)
         ),
       ]) as { data: FalKontextResult; requestId?: string };
 
@@ -448,10 +401,8 @@ export async function POST(req: NextRequest) {
           }
         } catch (uploadErr) {
           console.warn('[FanShot] Generated image upload failed, using fal.ai URL:', uploadErr);
-          // Continue with fal.ai temporary URL
         }
 
-        // Update generation record
         const admin = createAdminClient();
         await admin
           .from('generations')
@@ -462,7 +413,6 @@ export async function POST(req: NextRequest) {
           })
           .eq('id', generationId);
 
-        // Spend credit via DB function
         await admin.rpc('spend_credit', {
           p_user_id: userId,
           p_generation_id: generationId,
@@ -477,7 +427,6 @@ export async function POST(req: NextRequest) {
       console.log('[FanShot] Final Image URL:', finalImageUrl.slice(0, 80) + '...');
       console.log('[FanShot] Storage:', finalImageUrl !== falImageUrl ? 'Supabase' : 'fal.ai temporary');
       console.log('[FanShot] Request ID:', result.requestId || 'N/A');
-      console.log('[FanShot] Mode:', hasDualImages ? 'DUAL-IMAGE' : 'SINGLE-IMAGE');
       console.log('══════════════════════════════════════════');
 
       return NextResponse.json({
@@ -486,7 +435,7 @@ export async function POST(req: NextRequest) {
         prompt,
         processingTime: duration,
         mock: false,
-        dualImage: hasDualImages,
+        dualImage: false,
       });
     } catch (falErr) {
       const duration = Date.now() - startTime;

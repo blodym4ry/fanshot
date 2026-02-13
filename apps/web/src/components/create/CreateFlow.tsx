@@ -203,7 +203,6 @@ export function CreateFlow() {
           playerCountry: selectedPlayer.country,
           playerNumber: selectedPlayer.number,
           teamColors: selectedPlayer.teamColors,
-          playerPhotoUrl: selectedPlayer.photoUrl || undefined,
         }),
       });
       const data = await res.json();
