@@ -16,48 +16,23 @@ function base64ToBlob(base64DataUri: string): Blob {
   if (!matches) {
     throw new Error('Invalid base64 data URI format');
   }
-
   const mimeType = matches[1];
   const rawBase64 = matches[2];
-
-  // Node.js: Buffer → Uint8Array → Blob
   const buffer = Buffer.from(rawBase64, 'base64');
   return new Blob([buffer], { type: mimeType });
 }
 
-/* ─── Helper: upload image to fal.ai storage ─────────── */
+/* ─── Helper: upload base64 image to fal.ai storage ────── */
 
-async function uploadToFalStorage(
-  imageSource: string,
-  label: string
-): Promise<string> {
+async function uploadToFalStorage(base64DataUri: string, label: string): Promise<string> {
   console.log(`[FanShot] 📤 Uploading ${label} to fal.ai storage...`);
-  const uploadStart = Date.now();
-
-  let blob: Blob;
-
-  if (imageSource.startsWith('data:')) {
-    blob = base64ToBlob(imageSource);
-    console.log(`[FanShot]    Source: base64 data URI (${(blob.size / 1024).toFixed(0)}KB)`);
-  } else {
-    console.log(`[FanShot]    Source: remote URL → ${imageSource.slice(0, 80)}...`);
-    const response = await fetch(imageSource);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch image from URL: ${response.status} ${response.statusText}`);
-    }
-    blob = await response.blob();
-    console.log(`[FanShot]    Fetched remote image (${(blob.size / 1024).toFixed(0)}KB)`);
-  }
-
-  // Upload to fal.ai storage
+  const start = Date.now();
+  const blob = base64ToBlob(base64DataUri);
+  console.log(`[FanShot]    Size: ${(blob.size / 1024).toFixed(0)}KB`);
   const falUrl = await fal.storage.upload(
     new File([blob], `${label}.jpg`, { type: blob.type || 'image/jpeg' })
   );
-
-  const uploadDuration = Date.now() - uploadStart;
-  console.log(`[FanShot] ✅ ${label} uploaded to fal.ai storage in ${uploadDuration}ms`);
-  console.log(`[FanShot]    fal URL: ${falUrl}`);
-
+  console.log(`[FanShot] ✅ ${label} uploaded in ${Date.now() - start}ms → ${falUrl}`);
   return falUrl;
 }
 
@@ -71,7 +46,6 @@ interface GenerateRequest {
   playerCountry: string;
   playerNumber: number;
   teamColors: [string, string];
-  playerPhotoUrl?: string;
 }
 
 interface FalKontextResult {
@@ -81,30 +55,32 @@ interface FalKontextResult {
   prompt?: string;
 }
 
-/* ─── Estimated cost per generation ──────────────────────── */
-const ESTIMATED_COST_USD = 0.06; // Kontext Max single-image
+interface FalFaceSwapResult {
+  image: { url: string; content_type?: string; width?: number; height?: number };
+}
+
+/* ─── Estimated costs ────────────────────────────────────── */
+const COST_STAGE1 = 0.06; // FLUX Kontext Max scene generation
+const COST_STAGE2 = 0.04; // Easel AI face swap
+const COST_TOTAL = COST_STAGE1 + COST_STAGE2;
 
 /* ─── Helper: get auth user from request ────────────────── */
 
 async function getAuthUser(req: NextRequest): Promise<string | null> {
   if (!isAdminConfigured) return null;
-
   try {
     const authHeader = req.headers.get('authorization');
     const token = authHeader?.replace('Bearer ', '');
-
     if (!token) {
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
       const projectRef = supabaseUrl.match(/https:\/\/(.+)\.supabase\.co/)?.[1] || '';
       const cookieName = `sb-${projectRef}-auth-token`;
       const cookie = req.cookies.get(cookieName);
       if (!cookie) return null;
-
       try {
         const parsed = JSON.parse(cookie.value);
         const accessToken = parsed?.[0] || parsed?.access_token;
         if (!accessToken) return null;
-
         const admin = createAdminClient();
         const { data } = await admin.auth.getUser(accessToken);
         return data.user?.id || null;
@@ -112,7 +88,6 @@ async function getAuthUser(req: NextRequest): Promise<string | null> {
         return null;
       }
     }
-
     const admin = createAdminClient();
     const { data } = await admin.auth.getUser(token);
     return data.user?.id || null;
@@ -121,18 +96,17 @@ async function getAuthUser(req: NextRequest): Promise<string | null> {
   }
 }
 
-/* ─── POST handler ──────────────────────────────────────── */
+/* ─── POST handler — 2-Stage Pipeline ──────────────────── */
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
   try {
-    /* ── Body size guard (Vercel limit: 4.5MB) ──────────── */
+    /* ── Body size guard ─────────────────────────────────── */
     const contentLength = parseInt(req.headers.get('content-length') || '0', 10);
     if (contentLength > 4 * 1024 * 1024) {
-      console.error('[FanShot] ❌ Request body too large:', (contentLength / 1024 / 1024).toFixed(1) + 'MB');
       return NextResponse.json(
-        { error: 'Photo is too large. Please try a smaller photo or enable compression.' },
+        { error: 'Photo is too large. Please try a smaller photo.' },
         { status: 413 }
       );
     }
@@ -140,17 +114,14 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as GenerateRequest;
     const { selfieBase64, scene, playerName, playerCountry, playerNumber, teamColors } = body;
 
-    /* ── Validate base64 size (double check after parsing) ── */
+    /* ── Validate ────────────────────────────────────────── */
     const base64Size = selfieBase64 ? selfieBase64.length : 0;
     if (base64Size > 3 * 1024 * 1024) {
-      console.error('[FanShot] ❌ Selfie base64 too large:', (base64Size / 1024 / 1024).toFixed(1) + 'MB');
       return NextResponse.json(
-        { error: 'Photo is too large after encoding. Please use a smaller photo (max ~2MB).' },
+        { error: 'Photo is too large after encoding. Please use a smaller photo.' },
         { status: 413 }
       );
     }
-
-    /* Validate required fields */
     if (!selfieBase64 || !scene || !playerName) {
       return NextResponse.json(
         { error: 'Missing required fields: selfieBase64, scene, playerName' },
@@ -158,45 +129,29 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    /* Get authenticated user (may be null in dev mode) */
     const userId = await getAuthUser(req);
 
-    /* ── Build prompt (single-image mode — no player photo) ── */
+    /* ── Build prompt (Stage 1: scene generation) ────────── */
     let prompt: string;
     try {
-      prompt = buildPrompt(
-        scene,
-        {
-          playerName,
-          playerCountry: playerCountry || 'International',
-          playerNumber: playerNumber || 10,
-          teamColors: teamColors || ['#FFFFFF', '#000000'],
-        },
-        false // single-image mode: player described textually in prompt
-      );
+      prompt = buildPrompt(scene, {
+        playerName,
+        playerCountry: playerCountry || 'International',
+        playerNumber: playerNumber || 10,
+        teamColors: teamColors || ['#FFFFFF', '#000000'],
+      });
     } catch (e) {
-      return NextResponse.json(
-        { error: (e as Error).message },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: (e as Error).message }, { status: 400 });
     }
 
-    /* ── Upload selfie to Supabase Storage (if configured) ── */
+    /* ── Upload selfie to Supabase Storage (for records) ─── */
     let selfiePath: string | null = null;
-    let selfieStorageUrl: string | null = null;
 
     if (userId && isAdminConfigured) {
       try {
         selfiePath = await uploadSelfie(userId, selfieBase64);
-        if (selfiePath) {
-          const admin = createAdminClient();
-          const { data } = await admin.storage
-            .from('selfies')
-            .createSignedUrl(selfiePath, 600);
-          selfieStorageUrl = data?.signedUrl || null;
-        }
       } catch (storageErr) {
-        console.warn('[FanShot] Selfie upload to Supabase failed:', storageErr);
+        console.warn('[FanShot] Selfie Supabase upload failed:', storageErr);
       }
     }
 
@@ -210,9 +165,7 @@ export async function POST(req: NextRequest) {
           .from('generations')
           .insert({
             user_id: userId,
-            input_image_url: selfiePath
-              ? `storage://selfies/${selfiePath}`
-              : 'base64-inline',
+            input_image_url: selfiePath ? `storage://selfies/${selfiePath}` : 'base64-inline',
             scene_type: scene,
             player_style: playerName,
             prompt_used: prompt.slice(0, 2000),
@@ -221,7 +174,6 @@ export async function POST(req: NextRequest) {
           })
           .select('id')
           .single();
-
         if (genErr) {
           console.error('[FanShot] DB insert error:', genErr.message);
         } else {
@@ -238,30 +190,21 @@ export async function POST(req: NextRequest) {
     if (!falApiKey) {
       console.log('──────────────────────────────────────────');
       console.log('[FanShot] ⚠️  No FAL_API_KEY — MOCK MODE');
-      console.log('[FanShot] Mode: SINGLE-IMAGE (selfie only)');
-      console.log('[FanShot] Prompt:', prompt.slice(0, 150), '...');
-      console.log('[FanShot] Scene:', scene);
-      console.log('[FanShot] Player:', playerName);
-      console.log('[FanShot] User ID:', userId || 'anonymous');
+      console.log('[FanShot] Pipeline: 2-STAGE (scene gen + face swap)');
+      console.log('[FanShot] Scene:', scene, '| Player:', playerName);
+      console.log('[FanShot] Prompt:', prompt.slice(0, 200), '...');
       console.log('──────────────────────────────────────────');
 
       await new Promise((r) => setTimeout(r, 2500));
 
       if (generationId && userId && isAdminConfigured) {
         const admin = createAdminClient();
-        await admin
-          .from('generations')
-          .update({
-            output_image_url: MOCK_IMAGE_URL,
-            status: 'completed',
-            processing_time_ms: Date.now() - startTime,
-          })
-          .eq('id', generationId);
-
-        await admin.rpc('spend_credit', {
-          p_user_id: userId,
-          p_generation_id: generationId,
-        });
+        await admin.from('generations').update({
+          output_image_url: MOCK_IMAGE_URL,
+          status: 'completed',
+          processing_time_ms: Date.now() - startTime,
+        }).eq('id', generationId);
+        await admin.rpc('spend_credit', { p_user_id: userId, p_generation_id: generationId });
       }
 
       return NextResponse.json({
@@ -270,248 +213,197 @@ export async function POST(req: NextRequest) {
         prompt,
         processingTime: Date.now() - startTime,
         mock: true,
-        dualImage: false,
       });
     }
 
-    /* ── Configure fal.ai client ──────────────────────────── */
+    /* ── Configure fal.ai ────────────────────────────────── */
     fal.config({ credentials: falApiKey });
 
-    /* ── Upload selfie to fal.ai storage ─────────────────── */
-    /* fal.ai Kontext models need proper URLs, not base64 data URIs. */
+    console.log('══════════════════════════════════════════════════');
+    console.log('[FanShot] 🎯 2-STAGE PIPELINE — Starting');
+    console.log('[FanShot] Scene:', scene, '| Player:', playerName, '(' + playerCountry + ')');
+    console.log('[FanShot] User:', userId || 'anonymous', '| Gen ID:', generationId || 'N/A');
+    console.log('[FanShot] Est. cost: ~$' + COST_TOTAL.toFixed(2));
+    console.log('══════════════════════════════════════════════════');
 
-    const selfieDataUri = selfieBase64.startsWith('data:')
-      ? selfieBase64
-      : `data:image/jpeg;base64,${selfieBase64}`;
+    /* ════════════════════════════════════════════════════════
+     * STAGE 1: Generate scene image (text-to-image)
+     * Model: fal-ai/flux-pro/kontext/max
+     * No reference image — pure text prompt
+     * ════════════════════════════════════════════════════════ */
 
-    let selfieFalUrl: string;
+    console.log('[FanShot] ══ STAGE 1: Generating scene image ══');
+    console.log('[FanShot] Model: fal-ai/flux-pro/v1.1 (text-to-image)');
+    console.log('[FanShot] Prompt (first 300 chars):', prompt.slice(0, 300), '...');
+
+    const stage1Start = Date.now();
+    let sceneImageUrl: string;
+
     try {
-      selfieFalUrl = await uploadToFalStorage(selfieDataUri, 'selfie');
-    } catch (uploadErr) {
-      console.error('[FanShot] ❌ Selfie upload to fal.ai storage failed:', uploadErr);
-      if (selfieStorageUrl) {
-        console.log('[FanShot] ↩️  Falling back to Supabase signed URL');
-        selfieFalUrl = selfieStorageUrl;
-      } else {
-        return NextResponse.json(
-          { error: 'Failed to process selfie image. Please try again.' },
-          { status: 500 }
-        );
-      }
-    }
-
-    /* ── Single-image mode: fal-ai/flux-pro/kontext/max ──── */
-    /* The footballer is described textually in the prompt.
-       FLUX Kontext Max recognizes famous footballers by name.
-       No need for a second reference image. */
-    const modelId = 'fal-ai/flux-pro/kontext/max';
-
-    /* ── Logging ───────────────────────────────────────────── */
-    console.log('══════════════════════════════════════════');
-    console.log('[FanShot] 🎯 Starting AI Generation');
-    console.log('[FanShot] Model:', modelId);
-    console.log('[FanShot] Mode: SINGLE-IMAGE (selfie + textual player description)');
-    console.log('[FanShot] Scene:', scene);
-    console.log('[FanShot] Player:', playerName, '(' + (playerCountry || 'N/A') + ')');
-    console.log('[FanShot] Selfie fal URL:', selfieFalUrl.slice(0, 80) + '...');
-    console.log('[FanShot] User ID:', userId || 'anonymous');
-    console.log('[FanShot] Generation ID:', generationId || 'N/A');
-    console.log('[FanShot] Prompt (first 250 chars):', prompt.slice(0, 250), '...');
-    console.log('[FanShot] Estimated cost: ~$' + ESTIMATED_COST_USD.toFixed(2));
-    console.log('══════════════════════════════════════════');
-
-    /* ── fal.ai API call ───────────────────────────────────── */
-    try {
-      const falInput = {
-        prompt,
-        image_url: selfieFalUrl,
-        guidance_scale: 3.5,
-        output_format: 'jpeg' as const,
-        num_images: 1,
-        safety_tolerance: '5' as const,
-        aspect_ratio: '3:4' as const,
-      };
-
-      const result = await Promise.race([
-        fal.subscribe(modelId, {
-          input: falInput,
+      const sceneResult = await Promise.race([
+        fal.subscribe('fal-ai/flux-pro/v1.1', {
+          input: {
+            prompt,
+            num_images: 1,
+            output_format: 'jpeg' as const,
+            safety_tolerance: '5' as const,
+            image_size: { width: 768, height: 1024 },
+          },
           logs: true,
           onQueueUpdate: (update) => {
-            if (update.status === 'IN_QUEUE') {
-              console.log('[FanShot] ⏳ In queue...');
-            } else if (update.status === 'IN_PROGRESS') {
-              console.log('[FanShot] 🔄 Generating...');
-            }
+            if (update.status === 'IN_QUEUE') console.log('[FanShot] Stage 1 ⏳ In queue...');
+            if (update.status === 'IN_PROGRESS') console.log('[FanShot] Stage 1 🔄 Generating...');
           },
         }),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('TIMEOUT')), 120_000)
+          setTimeout(() => reject(new Error('STAGE1_TIMEOUT')), 90_000)
         ),
       ]) as { data: FalKontextResult; requestId?: string };
 
-      const duration = Date.now() - startTime;
-      const falImageUrl = result.data?.images?.[0]?.url;
+      sceneImageUrl = sceneResult.data?.images?.[0]?.url;
 
-      /* ── Check for NSFW content ─────────────────────────── */
-      if (result.data?.has_nsfw_concepts?.[0]) {
-        console.warn('[FanShot] ⛔ NSFW content detected — blocking');
-
-        if (generationId && isAdminConfigured) {
-          const admin = createAdminClient();
-          await admin
-            .from('generations')
-            .update({ status: 'failed', processing_time_ms: duration })
-            .eq('id', generationId);
-        }
-
-        return NextResponse.json(
-          { error: 'The generated image was flagged as inappropriate. Please try a different photo or scene.' },
-          { status: 422 }
-        );
+      if (!sceneImageUrl) {
+        throw new Error('No image returned from Stage 1');
       }
 
-      if (!falImageUrl) {
-        console.error('[FanShot] ❌ No image URL in response:', JSON.stringify(result.data).slice(0, 500));
+      const stage1Duration = Date.now() - stage1Start;
+      console.log(`[FanShot] ✅ Stage 1 complete in ${(stage1Duration / 1000).toFixed(1)}s`);
+      console.log(`[FanShot] Scene image: ${sceneImageUrl.slice(0, 80)}...`);
 
-        if (generationId && isAdminConfigured) {
-          const admin = createAdminClient();
-          await admin
-            .from('generations')
-            .update({ status: 'failed', processing_time_ms: duration })
-            .eq('id', generationId);
-        }
+    } catch (stage1Err) {
+      const errMsg = (stage1Err as Error).message || String(stage1Err);
+      console.error('[FanShot] ❌ Stage 1 failed:', errMsg);
 
-        return NextResponse.json(
-          { error: 'No image returned from AI. Please try again.' },
-          { status: 502 }
-        );
-      }
-
-      /* ── Upload generated image to Supabase Storage ────── */
-      let finalImageUrl = falImageUrl;
-
-      if (userId && generationId && isAdminConfigured) {
-        try {
-          const storagePath = await uploadGenerated(userId, generationId, falImageUrl);
-          if (storagePath) {
-            const publicUrl = getGeneratedPublicUrl(storagePath);
-            if (publicUrl) {
-              finalImageUrl = publicUrl;
-            }
-          }
-        } catch (uploadErr) {
-          console.warn('[FanShot] Generated image upload failed, using fal.ai URL:', uploadErr);
-        }
-
-        const admin = createAdminClient();
-        await admin
-          .from('generations')
-          .update({
-            output_image_url: finalImageUrl,
-            status: 'completed',
-            processing_time_ms: duration,
-          })
-          .eq('id', generationId);
-
-        await admin.rpc('spend_credit', {
-          p_user_id: userId,
-          p_generation_id: generationId,
-        });
-      }
-
-      /* ── Success logging ────────────────────────────────── */
-      console.log('══════════════════════════════════════════');
-      console.log('[FanShot] ✅ Generation complete!');
-      console.log('[FanShot] Duration:', (duration / 1000).toFixed(1) + 's');
-      console.log('[FanShot] Cost: ~$' + ESTIMATED_COST_USD.toFixed(2));
-      console.log('[FanShot] Final Image URL:', finalImageUrl.slice(0, 80) + '...');
-      console.log('[FanShot] Storage:', finalImageUrl !== falImageUrl ? 'Supabase' : 'fal.ai temporary');
-      console.log('[FanShot] Request ID:', result.requestId || 'N/A');
-      console.log('══════════════════════════════════════════');
-
-      return NextResponse.json({
-        imageUrl: finalImageUrl,
-        generationId,
-        prompt,
-        processingTime: duration,
-        mock: false,
-        dualImage: false,
-      });
-    } catch (falErr) {
-      const duration = Date.now() - startTime;
-      const errMessage = (falErr as Error).message || String(falErr);
-
-      // Mark generation as failed
       if (generationId && isAdminConfigured) {
         const admin = createAdminClient();
-        await admin
-          .from('generations')
-          .update({ status: 'failed', processing_time_ms: duration })
-          .eq('id', generationId);
+        await admin.from('generations').update({
+          status: 'failed',
+          processing_time_ms: Date.now() - startTime,
+        }).eq('id', generationId);
       }
 
-      /* ── Timeout ────────────────────────────────────────── */
-      if (errMessage === 'TIMEOUT') {
-        console.error('[FanShot] ⏰ Generation timed out after 120s');
-        return NextResponse.json(
-          { error: 'AI generation timed out (120s limit). Please try again.' },
-          { status: 504 }
-        );
+      if (errMsg === 'STAGE1_TIMEOUT') {
+        return NextResponse.json({ error: 'Scene generation timed out. Please try again.' }, { status: 504 });
       }
-
-      /* ── Invalid API key ────────────────────────────────── */
-      if (errMessage.includes('401') || errMessage.includes('Unauthorized') || errMessage.includes('Invalid API')) {
-        console.error('[FanShot] 🔑 Invalid FAL_API_KEY');
-        return NextResponse.json(
-          { error: 'AI service authentication failed. Please contact support.' },
-          { status: 401 }
-        );
+      if (errMsg.includes('401') || errMsg.includes('Unauthorized')) {
+        return NextResponse.json({ error: 'AI service authentication failed.' }, { status: 401 });
       }
-
-      /* ── Rate limit ─────────────────────────────────────── */
-      if (errMessage.includes('429') || errMessage.includes('rate limit') || errMessage.includes('Too Many')) {
-        console.error('[FanShot] 🚫 Rate limited by fal.ai');
-        return NextResponse.json(
-          { error: 'AI service is busy. Please try again in a few seconds.' },
-          { status: 429 }
-        );
+      if (errMsg.includes('429') || errMsg.includes('rate limit')) {
+        return NextResponse.json({ error: 'AI service is busy. Please try again shortly.' }, { status: 429 });
       }
-
-      /* ── Image download / 422 error ───────────────────── */
-      if (errMessage.includes('422') || errMessage.includes('download') || errMessage.includes('Failed to download')) {
-        console.error('[FanShot] 🖼️ Image download/processing error — fal.ai could not access images');
-        return NextResponse.json(
-          { error: 'AI could not process the uploaded images. Please try a different photo.' },
-          { status: 422 }
-        );
-      }
-
-      /* ── NSFW / Safety filter ───────────────────────────── */
-      if (errMessage.includes('NSFW') || errMessage.includes('safety') || errMessage.includes('content_filter')) {
-        console.warn('[FanShot] ⛔ Content safety filter triggered');
-        return NextResponse.json(
-          { error: 'The image was flagged by our safety system. Please try a different photo.' },
-          { status: 422 }
-        );
-      }
-
-      /* ── Generic fal.ai error ───────────────────────────── */
-      console.error('══════════════════════════════════════════');
-      console.error('[FanShot] ❌ fal.ai error after', (duration / 1000).toFixed(1) + 's');
-      console.error('[FanShot] Error:', errMessage);
-      console.error('[FanShot] Full error:', JSON.stringify(falErr, null, 2).slice(0, 1000));
-      console.error('══════════════════════════════════════════');
-
-      return NextResponse.json(
-        { error: `AI generation failed: ${errMessage.slice(0, 200)}` },
-        { status: 502 }
-      );
+      return NextResponse.json({ error: 'Scene generation failed. Please try again.' }, { status: 502 });
     }
+
+    /* ════════════════════════════════════════════════════════
+     * STAGE 2: Face swap — replace generic fan with user's selfie
+     * Model: easel-ai/advanced-face-swap
+     * ════════════════════════════════════════════════════════ */
+
+    console.log('[FanShot] ══ STAGE 2: Face swap ══');
+    console.log('[FanShot] Model: easel-ai/advanced-face-swap');
+
+    const stage2Start = Date.now();
+    let finalImageUrl: string;
+
+    try {
+      // Upload selfie to fal.ai storage for face swap
+      const selfieDataUri = selfieBase64.startsWith('data:')
+        ? selfieBase64
+        : `data:image/jpeg;base64,${selfieBase64}`;
+
+      const selfieUrl = await uploadToFalStorage(selfieDataUri, 'selfie');
+      console.log('[FanShot] Selfie uploaded for face swap');
+
+      const swapResult = await Promise.race([
+        fal.subscribe('easel-ai/advanced-face-swap', {
+          input: {
+            face_image_0: { url: selfieUrl },
+            gender_0: 'male' as const,
+            target_image: { url: sceneImageUrl },
+            workflow_type: 'user_hair' as const,
+            upscale: true,
+          },
+          logs: true,
+          onQueueUpdate: (update) => {
+            if (update.status === 'IN_QUEUE') console.log('[FanShot] Stage 2 ⏳ In queue...');
+            if (update.status === 'IN_PROGRESS') console.log('[FanShot] Stage 2 🔄 Swapping...');
+          },
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('STAGE2_TIMEOUT')), 90_000)
+        ),
+      ]) as { data: FalFaceSwapResult; requestId?: string };
+
+      finalImageUrl = swapResult.data?.image?.url;
+
+      if (!finalImageUrl) {
+        throw new Error('No image returned from face swap');
+      }
+
+      const stage2Duration = Date.now() - stage2Start;
+      console.log(`[FanShot] ✅ Stage 2 complete in ${(stage2Duration / 1000).toFixed(1)}s`);
+      console.log(`[FanShot] Final image: ${finalImageUrl.slice(0, 80)}...`);
+
+    } catch (stage2Err) {
+      const errMsg = (stage2Err as Error).message || String(stage2Err);
+      console.warn('[FanShot] ⚠️ Stage 2 (face swap) failed:', errMsg);
+      console.log('[FanShot] ↩️ Falling back to Stage 1 scene image (no face swap)');
+
+      // Fallback: return the scene image without face swap
+      finalImageUrl = sceneImageUrl;
+    }
+
+    /* ── Upload result to Supabase Storage ────────────────── */
+    const totalDuration = Date.now() - startTime;
+    let storedImageUrl = finalImageUrl;
+
+    if (userId && generationId && isAdminConfigured) {
+      try {
+        const storagePath = await uploadGenerated(userId, generationId, finalImageUrl);
+        if (storagePath) {
+          const publicUrl = getGeneratedPublicUrl(storagePath);
+          if (publicUrl) storedImageUrl = publicUrl;
+        }
+      } catch (uploadErr) {
+        console.warn('[FanShot] Result upload to Supabase failed:', uploadErr);
+      }
+
+      const admin = createAdminClient();
+      await admin.from('generations').update({
+        output_image_url: storedImageUrl,
+        status: 'completed',
+        processing_time_ms: totalDuration,
+      }).eq('id', generationId);
+
+      await admin.rpc('spend_credit', { p_user_id: userId, p_generation_id: generationId });
+    }
+
+    /* ── Success ──────────────────────────────────────────── */
+    console.log('══════════════════════════════════════════════════');
+    console.log('[FanShot] 🎉 2-STAGE PIPELINE COMPLETE!');
+    console.log('[FanShot] Total duration:', (totalDuration / 1000).toFixed(1) + 's');
+    console.log('[FanShot] Total cost: ~$' + COST_TOTAL.toFixed(2));
+    console.log('[FanShot] Scene image:', sceneImageUrl.slice(0, 60) + '...');
+    console.log('[FanShot] Final image:', storedImageUrl.slice(0, 60) + '...');
+    console.log('[FanShot] Face swap:', finalImageUrl !== sceneImageUrl ? 'SUCCESS' : 'SKIPPED (fallback)');
+    console.log('[FanShot] Storage:', storedImageUrl !== finalImageUrl ? 'Supabase' : 'fal.ai temporary');
+    console.log('══════════════════════════════════════════════════');
+
+    return NextResponse.json({
+      imageUrl: storedImageUrl,
+      generationId,
+      prompt,
+      processingTime: totalDuration,
+      mock: false,
+      stages: {
+        scene: sceneImageUrl,
+        final: storedImageUrl,
+        faceSwapSuccess: finalImageUrl !== sceneImageUrl,
+      },
+    });
+
   } catch (err) {
     console.error('[FanShot] 💥 Unexpected error:', err);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

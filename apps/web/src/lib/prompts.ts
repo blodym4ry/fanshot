@@ -1,34 +1,23 @@
 /**
- * FanShot Prompt Engine v5
+ * FanShot Prompt Engine v6 — Two-Stage Pipeline
  *
- * Primary mode: SINGLE-IMAGE — only the fan's selfie is supplied.
- * The footballer is described textually using detailed physical descriptions.
- * FLUX Kontext Max knows famous footballers by name; we add physical details
- * to maximize likeness accuracy.
+ * STAGE 1: Generate a scene image from scratch (no reference image).
+ *   - Model: fal-ai/flux-pro/kontext/max (text-to-image, no image_url)
+ *   - Creates a two-person photo: a generic male fan + a famous footballer
+ *   - The fan's face must be clearly visible for Stage 2 face swap
  *
- * Model: fal-ai/flux-pro/kontext/max  (single reference image)
- * Input: { image_url: selfieUrl, prompt: ... }
+ * STAGE 2: Face swap the fan's face with the user's selfie.
+ *   - Model: easel-ai/advanced-face-swap
+ *   - Replaces the generic fan face with the user's actual face
  *
- * Fallback dual-image mode is preserved for future use (when player photos
- * can be reliably hosted on Supabase Storage).
- *
- * Prompt structure:  CAMERA_PREFIX + SCENE_ACTION + SCENE_DETAILS + PHOTO_STYLE + FACE_PRESERVATION
+ * Prompt structure:
+ *   CAMERA_PREFIX + FAN_DESC + SCENE_ACTION + PLAYER_DESC + SCENE_DETAILS + PHOTO_STYLE + FACE_VISIBILITY
  */
-
-/* ─── Scene type: selfie vs third-person ──────────────── */
-
-const SELFIE_SCENES = new Set([
-  'tunnel_encounter',
-  'pitchside_quick',
-  'hotel_encounter',
-  'airport_arrival',
-  'warmup_pitch',
-]);
 
 /* ─── Detailed physical descriptions for top players ──── */
 
 const PLAYER_DESCRIPTIONS: Record<string, string> = {
-  // ═══ TOP 20 GLOBAL STARS ═══
+  // ═══ TOP GLOBAL STARS ═══
   'Lionel Messi':
     'Lionel Messi, the legendary Argentine footballer — light-skinned man in his late 30s, short brown hair with slight beard, medium height around 170cm, lean athletic build, calm gentle expression, distinctive tattoo sleeve on right arm',
   'Cristiano Ronaldo':
@@ -119,8 +108,6 @@ const PLAYER_DESCRIPTIONS: Record<string, string> = {
     'Mohammed Kudus, the Ghanaian footballer — young Black man, short dark hair, athletic build around 177cm, Ghanaian features, exciting energetic expression',
   'Martin Ødegaard':
     'Martin Ødegaard, the Norwegian footballer — young man around 178cm, light brown hair, fair Nordic features, slim athletic build, captain-like composed expression',
-
-  // ═══ GOALKEEPERS & DEFENDERS ═══
   'Alisson':
     'Alisson Becker, the Brazilian goalkeeper — tall man around 191cm, short brown hair, short beard, Brazilian features, calm commanding presence',
   'Thibaut Courtois':
@@ -190,97 +177,117 @@ const JERSEY_COLORS: Record<string, string> = {
   'Bosnia and Herzegovina': 'blue with white and yellow trim',
 };
 
-/* ─── PHOTO_STYLE suffix (appended to every prompt) ──── */
+/* ─── Photo style constants ──────────────────────────── */
 
 const PHOTO_STYLE =
-  'Ultra-realistic smartphone photograph. Real camera sensor noise, natural depth of field, authentic smartphone color grading. Realistic skin with pores, natural under-eye shadows, authentic fabric wrinkles. No extra fingers, perfect human anatomy, natural proportions. This must look identical to a real photo posted on social media — NOT a render, NOT AI art, NOT a professional photoshoot.';
+  'The photograph must be indistinguishable from a real smartphone photo — natural camera sensor noise, realistic depth of field, imperfect framing, authentic available lighting, slight motion blur. Realistic skin with pores and natural imperfections. No extra fingers, perfect human anatomy, natural proportions. NOT a render, NOT AI art, NOT a professional photoshoot.';
 
-/* ─── Scene templates ─────────────────────────────────── */
+const FAN_DESC =
+  'a male fan in his late 20s, average build, clean shaven, wearing casual clothes (dark t-shirt and jeans)';
+
+const FACE_VISIBILITY =
+  'CRITICAL REQUIREMENT: The fan\'s face must be clearly visible, well-lit, unobstructed, and facing the camera directly with both eyes visible. The fan\'s face must occupy a significant portion of the frame and be in sharp focus — this is essential for post-processing. Do not obscure, shadow, or partially hide the fan\'s face in any way.';
+
+/* ─── Scene templates for text-to-image generation ────── */
 
 interface SceneTemplate {
-  /** What is happening in the scene */
+  /** Camera / framing prefix */
+  camera: string;
+  /** The scene action description */
   action: string;
   /** Environmental / setting details */
   details: string;
 }
 
-/**
- * Placeholders:
- *   [FAN]     = "the person in the reference image" (single-image primary mode)
- *   [PLAYER]  = detailed physical description + name + country (single-image)
- *             OR "the person in the second image (Name)" (dual-image future mode)
- *   [JERSEY]  = country jersey color description
- *   [COUNTRY] = player's country name
- */
 const sceneTemplates: Record<string, SceneTemplate> = {
   tunnel_encounter: {
+    camera:
+      'Ultra-realistic smartphone selfie photograph, front camera at arm\'s length, slightly below angle, minor front-camera lens distortion, warm fluorescent lighting.',
     action:
-      '[FAN] takes a quick selfie with [PLAYER] in a stadium tunnel after a FIFA World Cup 2026 match. [PLAYER] is wearing [COUNTRY] national team jersey ([JERSEY]), visibly sweaty with flushed cheeks, has briefly stopped to lean into the fan\'s selfie. [PLAYER] gives a quick polite smile — clearly gracious but in a hurry. [FAN] holds the phone up with one hand, looking excited and slightly nervous.',
+      '[FAN] takes a quick selfie with [PLAYER] in a concrete stadium tunnel right after a FIFA World Cup 2026 match. [PLAYER] is wearing the [COUNTRY] national team jersey ([JERSEY]), visibly sweaty with flushed cheeks and damp hair, has briefly stopped walking to lean into the fan\'s selfie frame. [PLAYER] gives a quick polite smile — clearly gracious but in a hurry to get to the locker room. [FAN] holds the phone up with one extended arm, looking excited and slightly nervous, eyes wide with disbelief.',
     details:
-      'Concrete tunnel walls, dim fluorescent overhead lights, other staff and players walking past blurred in background. The selfie captures both faces at close range.',
+      'Concrete tunnel walls with exposed pipes along the ceiling, dim flickering fluorescent overhead lights casting slightly greenish tint, other staff members and substitute players walking past blurred in the background, equipment bags visible against the wall, the tunnel floor is slightly wet. The selfie captures both faces at close range with the typical front-camera wide-angle distortion. A security guard is partially visible at the edge of the frame.',
   },
 
   pitchside_quick: {
+    camera:
+      'Ultra-realistic smartphone selfie photograph, front camera held high, tilted down slightly, natural floodlight illumination with slight lens flare.',
     action:
-      '[FAN] has managed a quick selfie with [PLAYER] at the edge of the pitch after a World Cup match. [PLAYER] in [COUNTRY] match jersey ([JERSEY]), grass stains on shorts, sweat glistening on forehead, has leaned over the advertising board barrier for the photo. [FAN] reaches up with the phone from the front row.',
+      '[FAN] has managed a quick selfie with [PLAYER] at the edge of the pitch after a FIFA World Cup 2026 match. [PLAYER] in the [COUNTRY] match-worn jersey ([JERSEY]), visible grass stains on the white shorts, sweat glistening on the forehead and temples, has leaned over the advertising board barrier specifically for this fan photo. [PLAYER] flashes a quick tired smile, still catching breath. [FAN] reaches up excitedly with the phone from the front row of the stands, leaning forward over the barrier, grinning broadly.',
     details:
-      'Stadium seats, green pitch, and floodlights creating slight lens flare in background. Excited crowd partially visible. Quick spontaneous moment.',
+      'Bright green pitch stretching into the background, stadium floodlights creating dramatic backlight and slight lens flare, rows of colorful seats rising behind the fan, a few other fans in the front rows waving and cheering, LED advertising boards displaying sponsor logos along the pitch perimeter, scattered confetti on the grass. The evening sky is visible above the stadium roof. Shot has the characteristic selfie distortion from the close distance.',
   },
 
   mixed_zone: {
+    camera:
+      'Ultra-realistic smartphone photograph taken by a friend or bystander from about 2 meters away, rear camera, natural harsh fluorescent lighting, slightly off-center composition.',
     action:
-      '[FAN] standing next to [PLAYER] in the mixed zone area after a World Cup 2026 match. [PLAYER] in [COUNTRY] jersey ([JERSEY]) with towel over one shoulder, face still flushed from the match. Standing side by side with a small gap — not touching, just close for the photo. [FAN] smiling broadly. [PLAYER] gives a tired but genuine half-smile.',
+      '[FAN] standing next to [PLAYER] in the mixed zone media area right after a World Cup 2026 match. [PLAYER] in the [COUNTRY] jersey ([JERSEY]) with a white towel draped over one shoulder, face still flushed and shiny from exertion, hair slightly disheveled from the match. They stand side by side with a small gap between them — not touching, just close enough for the photo. [FAN] is smiling broadly with hands at his sides. [PLAYER] gives a tired but genuine half-smile, eyes slightly squinted from the harsh lights.',
     details:
-      'Media backdrop with FIFA sponsors partially visible behind them. Harsh fluorescent lighting creating slight shadows. Photo taken from about 2 meters away.',
+      'FIFA World Cup 2026 branded media backdrop with repeating sponsor logos visible behind them, harsh white fluorescent overhead lighting creating slight shadows under their eyes, a microphone boom partially visible at the top edge, other journalists and camera crews working in the blurred background, cables running along the floor, credential lanyards visible on several people. The floor is polished concrete. Someone else\'s camera flash reflects faintly in the backdrop.',
   },
 
   training_ground: {
+    camera:
+      'Ultra-realistic smartphone photograph taken by a bystander, rear camera, bright natural daylight, candid composition from about 1.5 meters away.',
     action:
-      '[FAN] posing for a photo with [PLAYER] at a World Cup 2026 training session. [PLAYER] in [COUNTRY] training kit (casual athletic wear in [JERSEY] colors), has walked to the barrier fence to meet fans. Standing side by side on opposite sides of a low fence, [PLAYER] leaning on it casually. [FAN] is beaming.',
+      '[FAN] posing for a photo with [PLAYER] at an open World Cup 2026 training session. [PLAYER] is wearing the [COUNTRY] training kit — casual athletic wear in team colors ([JERSEY] colors), a light training bib over the top — and has jogged over to the perimeter barrier fence to greet fans. They stand on opposite sides of a low metal barrier fence, [PLAYER] leaning on it casually with one arm, slightly out of breath from training drills. [FAN] is beaming with excitement, standing right against the barrier on the public side.',
     details:
-      'Training pitch, cones, and other players stretching visible in the background. Bright outdoor daylight casting natural shadows.',
+      'Lush green training pitch stretching behind [PLAYER] with orange training cones scattered around, other squad players stretching and passing balls in small groups in the distance, coaching staff with clipboards visible, team equipment bags lined up along the sideline, a temporary shade canopy in the far background. Bright outdoor daylight casting natural shadows, blue sky with scattered clouds. A few other fans are visible along the barrier taking photos with their phones.',
   },
 
   hotel_encounter: {
+    camera:
+      'Ultra-realistic smartphone selfie photograph, front camera at arm\'s length, warm ambient indoor lighting, natural hotel lobby ambiance.',
     action:
-      '[FAN] has spotted [PLAYER] in a luxury hotel lobby and asked for a quick selfie. [PLAYER] is in casual designer clothing — clean fitted t-shirt, expensive watch visible, relaxed posture. [PLAYER] politely leans slightly toward the camera with a casual smile. [FAN] holds the phone up, looking thrilled and slightly starstruck.',
+      '[FAN] has spotted [PLAYER] in the lobby of a luxury five-star hotel and nervously asked for a quick selfie. [PLAYER] is dressed in smart casual designer clothing — a clean fitted black t-shirt, expensive-looking watch on the wrist, tailored jogger pants — looking relaxed and freshly groomed, clearly off-duty. [PLAYER] politely leans slightly toward the camera with a casual friendly smile. [FAN] holds the phone up with a slightly trembling hand, looking thrilled and starstruck, mouth open in excited disbelief.',
     details:
-      'Elegant hotel lobby with marble floor, modern furniture, warm ambient lighting. Other hotel guests walking past, slightly blurred. A candid lucky encounter.',
+      'Elegant hotel lobby with polished marble floor reflecting the warm lights, modern designer furniture — leather sofas and glass coffee tables — in the background, tall indoor plants, a reception desk with staff partially visible, warm amber recessed lighting creating a luxurious atmosphere. Other hotel guests walk past in the background, slightly motion-blurred. A large abstract painting is visible on the wall. The lobby has floor-to-ceiling windows showing a city skyline at dusk.',
   },
 
   stadium_exit: {
+    camera:
+      'Ultra-realistic smartphone photograph taken by a friend, rear camera, dramatic night lighting from stadium exterior floods, slightly grainy from low light.',
     action:
-      '[FAN] next to [PLAYER] outside the stadium after a World Cup 2026 night match. [PLAYER] in [COUNTRY] team tracksuit or post-match jacket ([JERSEY] colors), wearing headphones around neck, about to get on the team bus. Stopped for a brief moment for this photo. Standing close but not touching.',
+      '[FAN] standing next to [PLAYER] outside the stadium after a World Cup 2026 night match. [PLAYER] is wearing the [COUNTRY] team tracksuit or post-match jacket in team colors ([JERSEY] colors), wearing large over-ear headphones around the neck, carrying a small designer bag, about to board the team bus. [PLAYER] has stopped for just a brief moment for this photo and gives a quick but warm smile. [FAN] is standing close but not touching, grinning ear to ear.',
     details:
-      'Night time, stadium exterior lights illuminating them, crowd and team bus in background. [FAN] is grinning. Security personnel partially visible.',
+      'Night-time scene with powerful stadium exterior floodlights creating dramatic backlighting and long shadows on the concrete, the sleek team coach bus visible behind them with its interior lights on, a small crowd of waiting fans held back by metal barriers, security personnel in dark suits partially visible at the edges, parking lot with several luxury cars, steam rising from a nearby grate. The stadium\'s illuminated exterior architecture towers in the background. A few phone camera flashes from other fans create small light spots.',
   },
 
   celebration_moment: {
+    camera:
+      'Ultra-realistic smartphone photograph captured in the chaos of celebration, rear camera, dramatic floodlight illumination, slightly blurred edges from movement.',
     action:
-      '[FAN] on the pitch with [PLAYER] during post-match celebrations after [COUNTRY] won their World Cup 2026 match. [PLAYER] in [COUNTRY] jersey ([JERSEY]), ecstatic, sweaty, jersey slightly untucked. [FAN] has gotten close during the pitch invasion. [PLAYER] has an arm raised in celebration, [FAN] is euphoric.',
+      '[FAN] on the pitch alongside [PLAYER] during ecstatic post-match celebrations after [COUNTRY] won their FIFA World Cup 2026 match. [PLAYER] in the [COUNTRY] jersey ([JERSEY]), absolutely ecstatic — sweaty, jersey untucked and pulled out, shorts slightly askew, one arm raised triumphantly in the air. [FAN] has somehow gotten onto the pitch during the wild pitch invasion and is right next to the player, fist pumping with pure euphoria, face contorted in a scream of joy.',
     details:
-      'Confetti falling, other celebrating players and fans in the chaotic background. Floodlit stadium, electric atmosphere. Someone in the crowd captured this moment.',
+      'Colorful confetti raining down everywhere catching the floodlights, other celebrating players hugging and sliding on the pitch in the background, a massive crowd of fans who have invaded the pitch creating a chaotic joyful mass, stadium floodlights creating an electric bright atmosphere, giant screens showing replays, torn-up pitch grass and divots visible, discarded flags and scarves on the ground. The frame is slightly tilted from the chaos. Someone nearby is spraying water from a bottle.',
   },
 
   autograph_line: {
+    camera:
+      'Ultra-realistic smartphone photograph taken from across a table, rear camera, indoor event lighting, composed but slightly off-center framing.',
     action:
-      '[FAN] at a FIFA fan zone autograph session with [PLAYER]. [PLAYER] sitting behind a table wearing [COUNTRY] team polo or branded casual wear ([JERSEY] colors), pen in hand. [FAN] standing on the other side of the table, leaning forward slightly with a big smile. [PLAYER] looks up at the camera with a practiced warm smile.',
+      '[FAN] at an official FIFA Fan Zone autograph session with [PLAYER]. [PLAYER] is sitting behind a long signing table wearing the [COUNTRY] team polo shirt or branded casual wear in team colors ([JERSEY] colors), a marker pen in hand, stacks of photos and merchandise on the table. [FAN] is standing on the other side of the table, leaning forward slightly with a big smile, both hands on the table edge. [PLAYER] looks up at the camera with a practiced warm media smile, pausing from signing.',
     details:
-      'FIFA and sponsor branding visible on the backdrop. Indoor event lighting, queue of other fans visible in the background.',
+      'Official FIFA World Cup 2026 and sponsor branding on a large backdrop behind them with repeating logos, professional indoor event lighting with softboxes creating even illumination, a queue of excited fans visible stretching behind in the background, velvet rope barriers guiding the line, security staff in polo shirts standing nearby, bottles of water and marker pens scattered on the table, a small placard with [PLAYER]\'s name and number visible. Other fans are taking photos from behind the rope.',
   },
 
   warmup_pitch: {
+    camera:
+      'Ultra-realistic smartphone selfie photograph from a high angle in the stands, front camera, beautiful golden hour natural light, slight upward perspective.',
     action:
-      '[FAN] taking a selfie from the front row during World Cup 2026 warmup. [PLAYER] in [COUNTRY] warmup bib ([JERSEY] colors) has jogged over to the stands and leaned close to the barrier for a quick photo. [PLAYER] is loose, relaxed, pre-match focused energy, slight smile. [FAN] reaching forward with the phone, excited.',
+      '[FAN] taking a selfie from the front row of the stands during the World Cup 2026 pre-match warmup. [PLAYER] in the [COUNTRY] training warmup bib ([JERSEY] colors) has just jogged over to the barrier and leaned close to the advertising boards for a quick interaction with fans. [PLAYER] is loose and relaxed with focused pre-match energy, offering a slight confident smile. [FAN] is reaching forward and downward with the phone from the elevated first row, face lit up with excitement.',
     details:
-      'Nearly empty stadium behind them, pristine green pitch, other players warming up in the distance. Late afternoon golden hour light.',
+      'The nearly empty stadium rising behind them with thousands of seats in various colors, pristine unmarked green pitch glistening in the golden light, white pitch markings freshly painted, other squad players doing stretching exercises and rondo drills in the distance, coaching staff standing with arms crossed watching, ball bags and training equipment scattered on the sideline. Late afternoon golden hour sunlight streaming into the stadium creating long warm shadows and beautiful rim lighting on both faces. The stadium\'s scoreboard shows the upcoming match details.',
   },
 
   airport_arrival: {
+    camera:
+      'Ultra-realistic smartphone selfie photograph, front camera at arm\'s length, bright artificial terminal lighting, typical airport ambiance.',
     action:
-      '[FAN] taking a selfie with [PLAYER] at an airport. [PLAYER] is in smart casual travel clothing — designer jacket, comfortable pants, sunglasses pushed up on head, pulling carry-on luggage. Stopped briefly in the terminal for this fan photo. [PLAYER] gives a quick friendly smile. [FAN] is clearly excited.',
+      '[FAN] taking a selfie with [PLAYER] in a busy international airport terminal. [PLAYER] is in smart casual travel clothing — a designer bomber jacket over a plain t-shirt, comfortable fitted pants, clean white sneakers, dark sunglasses pushed up on top of the head — pulling a luxury carry-on suitcase with one hand. [PLAYER] has stopped briefly in the middle of the terminal concourse for this fan photo, giving a quick friendly but slightly tired smile. [FAN] is clearly excited, eyes wide, holding the phone up.',
     details:
-      'Airport terminal with departure boards, other travelers, bright terminal lighting. A quick lucky airport encounter selfie.',
+      'Modern airport terminal with high ceilings and glass walls, departure information boards showing flight times in the background, other travelers walking with luggage creating slight motion blur, duty-free shop storefronts with illuminated displays visible, polished reflective terminal floor, overhead directional signage, a coffee shop counter visible in the distance. Bright white terminal lighting with some natural light coming through the large windows. A bodyguard or team official in a suit is partially visible just behind [PLAYER].',
   },
 };
 
@@ -289,35 +296,31 @@ const sceneTemplates: Record<string, SceneTemplate> = {
 export interface PlayerPromptData {
   playerName: string;
   playerCountry: string;
-  playerNumber: number;
-  teamColors: [string, string];
+  playerNumber?: number;
+  teamColors?: [string, string] | string;
 }
 
 /**
  * Get the detailed player description for the prompt.
- * Falls back to a generic description with name + country if no detailed one exists.
+ * Falls back to a generic description with name + country.
  */
-function getPlayerDescription(playerName: string, playerCountry: string): string {
-  // Check exact match first
+export function getPlayerDescription(playerName: string, playerCountry: string): string {
   if (PLAYER_DESCRIPTIONS[playerName]) {
     return PLAYER_DESCRIPTIONS[playerName];
   }
-
-  // Fallback: generic description with name + country
   return `${playerName}, the famous ${playerCountry} international footballer`;
 }
 
 /**
- * Build the text prompt for FLUX Kontext Max.
+ * Build the scene generation prompt (Stage 1).
+ * No reference image — generates a complete scene from text only.
  *
- * @param scene           — scene ID (e.g. 'tunnel_encounter')
- * @param player          — player metadata
- * @param hasDualImages   — true when both selfie + player photo are supplied (future use)
+ * @param scene  — scene ID (e.g. 'tunnel_encounter')
+ * @param player — player metadata
  */
 export function buildPrompt(
   scene: string,
   player: PlayerPromptData,
-  hasDualImages: boolean = false
 ): string {
   const template = sceneTemplates[scene];
   if (!template) {
@@ -327,41 +330,29 @@ export function buildPrompt(
   const { playerName, playerCountry } = player;
 
   // Get jersey color description
-  const jerseyDesc =
-    JERSEY_COLORS[playerCountry] ||
-    `${player.teamColors[0]} and ${player.teamColors[1]}`;
+  const teamColorsStr = typeof player.teamColors === 'string'
+    ? player.teamColors
+    : Array.isArray(player.teamColors)
+      ? `${player.teamColors[0]} and ${player.teamColors[1]}`
+      : '';
+  const jerseyDesc = JERSEY_COLORS[playerCountry] || teamColorsStr || 'team colors';
 
-  // Fan / Player descriptors depending on mode
-  const fanDesc = hasDualImages
-    ? 'the person in the first image'
-    : 'the person in the reference image';
+  // Get detailed player description
+  const playerDesc = getPlayerDescription(playerName, playerCountry);
 
-  const playerDesc = hasDualImages
-    ? `the person in the second image (${playerName})`
-    : getPlayerDescription(playerName, playerCountry);
-
-  // Select camera style prefix
-  const cameraPrefix = SELFIE_SCENES.has(scene)
-    ? 'Authentic smartphone selfie, front camera at arm\'s length, slightly below angle. Minor imperfections — natural front-camera lens distortion, slight warmth from lighting. '
-    : 'Authentic smartphone photograph taken by a friend or bystander, rear camera, natural framing, from 1.5-2 meters away. Slightly candid, not perfectly composed, natural available light. ';
-
-  // Face preservation instruction
-  const facePreservation = hasDualImages
-    ? ' CRITICAL: The fan must be the EXACT same person as the first reference image. The footballer must be the EXACT same person as the second reference image. Preserve both faces, skin tones, hair, and all distinguishing features with 100% accuracy. Do not blend or mix their faces.'
-    : ' CRITICAL: The fan must be the EXACT same person as the reference/input image. Preserve their face, skin tone, hair, and all distinguishing features with 100% accuracy. The footballer should look like the real ' + playerName + ' — use your knowledge of this famous person to generate an accurate likeness.';
-
-  // Build scene text with placeholder replacements
+  // Replace placeholders
   const replacePlaceholders = (text: string) =>
     text
-      .replace(/\[FAN\]/g, fanDesc)
+      .replace(/\[FAN\]/g, FAN_DESC)
       .replace(/\[PLAYER\]/g, playerDesc)
       .replace(/\[JERSEY\]/g, jerseyDesc)
       .replace(/\[COUNTRY\]/g, playerCountry);
 
+  const cameraText = template.camera;
   const actionText = replacePlaceholders(template.action);
   const detailsText = replacePlaceholders(template.details);
 
-  return `${cameraPrefix}${actionText} ${detailsText} ${PHOTO_STYLE}${facePreservation}`;
+  return `${cameraText} ${actionText} ${detailsText} ${PHOTO_STYLE} ${FACE_VISIBILITY}`;
 }
 
 export { sceneTemplates, PLAYER_DESCRIPTIONS };
