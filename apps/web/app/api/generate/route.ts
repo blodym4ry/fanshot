@@ -9,6 +9,61 @@ import { uploadSelfie, uploadGenerated, getGeneratedPublicUrl } from '@/src/lib/
 const MOCK_IMAGE_URL =
   'https://fal.media/files/penguin/OhNORVhHSIOfTpCvsbnAa_image.webp';
 
+/* ─── Helper: convert base64 data URI to Blob (Node.js) ── */
+
+function base64ToBlob(base64DataUri: string): Blob {
+  // Extract MIME type and raw base64
+  const matches = base64DataUri.match(/^data:(.+?);base64,(.+)$/);
+  if (!matches) {
+    throw new Error('Invalid base64 data URI format');
+  }
+
+  const mimeType = matches[1];
+  const rawBase64 = matches[2];
+
+  // Node.js: Buffer → Uint8Array → Blob
+  const buffer = Buffer.from(rawBase64, 'base64');
+  return new Blob([buffer], { type: mimeType });
+}
+
+/* ─── Helper: upload image to fal.ai storage ─────────── */
+
+async function uploadToFalStorage(
+  imageSource: string,
+  label: string
+): Promise<string> {
+  console.log(`[FanShot] 📤 Uploading ${label} to fal.ai storage...`);
+  const uploadStart = Date.now();
+
+  let blob: Blob;
+
+  if (imageSource.startsWith('data:')) {
+    // base64 data URI → Blob
+    blob = base64ToBlob(imageSource);
+    console.log(`[FanShot]    Source: base64 data URI (${(blob.size / 1024).toFixed(0)}KB)`);
+  } else {
+    // Remote URL → fetch → Blob
+    console.log(`[FanShot]    Source: remote URL → ${imageSource.slice(0, 80)}...`);
+    const response = await fetch(imageSource);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image from URL: ${response.status} ${response.statusText}`);
+    }
+    blob = await response.blob();
+    console.log(`[FanShot]    Fetched remote image (${(blob.size / 1024).toFixed(0)}KB)`);
+  }
+
+  // Upload to fal.ai storage
+  const falUrl = await fal.storage.upload(
+    new File([blob], `${label}.jpg`, { type: blob.type || 'image/jpeg' })
+  );
+
+  const uploadDuration = Date.now() - uploadStart;
+  console.log(`[FanShot] ✅ ${label} uploaded to fal.ai storage in ${uploadDuration}ms`);
+  console.log(`[FanShot]    fal URL: ${falUrl}`);
+
+  return falUrl;
+}
+
 /* ─── Types ─────────────────────────────────────────────── */
 
 interface GenerateRequest {
@@ -235,16 +290,48 @@ export async function POST(req: NextRequest) {
     /* ── Configure fal.ai client ──────────────────────────── */
     fal.config({ credentials: falApiKey });
 
-    /* Prepare selfie image URL for fal.ai */
-    const selfieImageUrl = selfieStorageUrl
-      || (selfieBase64.startsWith('data:')
-        ? selfieBase64
-        : `data:image/jpeg;base64,${selfieBase64}`);
+    /* ── Upload selfie to fal.ai storage ───────────────── */
+    /* fal.ai Kontext models need proper URLs, not base64 data URIs.
+       We upload the selfie to fal.ai's own storage and use the returned URL. */
+
+    const selfieDataUri = selfieBase64.startsWith('data:')
+      ? selfieBase64
+      : `data:image/jpeg;base64,${selfieBase64}`;
+
+    let selfieFalUrl: string;
+    try {
+      selfieFalUrl = await uploadToFalStorage(selfieDataUri, 'selfie');
+    } catch (uploadErr) {
+      console.error('[FanShot] ❌ Selfie upload to fal.ai storage failed:', uploadErr);
+      // Fallback: try Supabase signed URL if available
+      if (selfieStorageUrl) {
+        console.log('[FanShot] ↩️  Falling back to Supabase signed URL');
+        selfieFalUrl = selfieStorageUrl;
+      } else {
+        return NextResponse.json(
+          { error: 'Failed to process selfie image. Please try again.' },
+          { status: 500 }
+        );
+      }
+    }
+
+    /* ── Upload player photo to fal.ai storage if needed ── */
+    let playerFalUrl: string | null = null;
+    if (hasDualImages && playerPhotoUrl) {
+      try {
+        playerFalUrl = await uploadToFalStorage(playerPhotoUrl, 'player-photo');
+      } catch (playerUploadErr) {
+        console.warn('[FanShot] ⚠️  Player photo upload to fal.ai storage failed:', playerUploadErr);
+        console.log('[FanShot] ↩️  Trying direct player photo URL as fallback...');
+        // Try using the direct URL as-is (works for some sources)
+        playerFalUrl = playerPhotoUrl;
+      }
+    }
 
     /* ── Build image_urls array for Kontext Max Multi ────── */
-    const imageUrls: string[] = [selfieImageUrl];
-    if (hasDualImages && playerPhotoUrl) {
-      imageUrls.push(playerPhotoUrl);
+    const imageUrls: string[] = [selfieFalUrl];
+    if (hasDualImages && playerFalUrl) {
+      imageUrls.push(playerFalUrl);
     }
 
     /* ── Select model based on mode ─────────────────────── */
@@ -260,10 +347,11 @@ export async function POST(req: NextRequest) {
     console.log('[FanShot] Scene:', scene);
     console.log('[FanShot] Player:', playerName, '(' + (playerCountry || 'N/A') + ')');
     console.log('[FanShot] Player Photo URL:', playerPhotoUrl ? playerPhotoUrl.slice(0, 80) + '...' : 'N/A');
+    console.log('[FanShot] Selfie fal URL:', selfieFalUrl.slice(0, 80) + '...');
+    console.log('[FanShot] Player fal URL:', playerFalUrl ? playerFalUrl.slice(0, 80) + '...' : 'N/A');
     console.log('[FanShot] User ID:', userId || 'anonymous');
     console.log('[FanShot] Generation ID:', generationId || 'N/A');
     console.log('[FanShot] Image count:', imageUrls.length);
-    console.log('[FanShot] Selfie source:', selfieStorageUrl ? 'Supabase Storage' : 'base64 inline');
     console.log('[FanShot] Prompt (first 200 chars):', prompt.slice(0, 200), '...');
     console.log('[FanShot] Estimated cost: ~$' + ESTIMATED_COST_USD.toFixed(2));
     console.log('══════════════════════════════════════════');
@@ -283,7 +371,7 @@ export async function POST(req: NextRequest) {
           }
         : {
             prompt,
-            image_url: selfieImageUrl,
+            image_url: selfieFalUrl,
             guidance_scale: 3.5,
             output_format: 'jpeg' as const,
             num_images: 1,
@@ -437,6 +525,15 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           { error: 'AI service is busy. Please try again in a few seconds.' },
           { status: 429 }
+        );
+      }
+
+      /* ── Image download / 422 error ───────────────────── */
+      if (errMessage.includes('422') || errMessage.includes('download') || errMessage.includes('Failed to download')) {
+        console.error('[FanShot] 🖼️ Image download/processing error — fal.ai could not access images');
+        return NextResponse.json(
+          { error: 'AI could not process the uploaded images. Please try a different photo.' },
+          { status: 422 }
         );
       }
 
