@@ -116,6 +116,20 @@ export function CreateFlow() {
   const [openCountry, setOpenCountry] = useState<string | null>(null);
   const [aiChecked, setAiChecked] = useState(false);
 
+  /* ── Horizontal scroll touch handler (prevents vertical scroll jank on mobile) ── */
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }, []);
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const deltaX = Math.abs(e.touches[0].clientX - touchStartRef.current.x);
+    const deltaY = Math.abs(e.touches[0].clientY - touchStartRef.current.y);
+    if (deltaX > deltaY) {
+      e.stopPropagation();
+    }
+  }, []);
+
   /* Read ?scene= from URL on first mount */
   useEffect(() => {
     if (initializedRef.current) return;
@@ -373,7 +387,12 @@ export function CreateFlow() {
         <h3 className="mb-2.5 font-oswald text-xs font-semibold uppercase tracking-[0.2em] text-text-muted">
           🎬 {t('selectScene')}
         </h3>
-        <div className="scrollbar-none -mx-4 snap-x snap-mandatory overflow-x-auto px-4">
+        <div
+          className="scrollbar-none -mx-4 snap-x snap-mandatory overflow-x-auto overflow-y-hidden px-4"
+          style={{ WebkitOverflowScrolling: 'touch' }}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+        >
           <div className="flex gap-2.5">
             {scenes.map((scene) => {
               const isActive = selectedScene === scene.id;
