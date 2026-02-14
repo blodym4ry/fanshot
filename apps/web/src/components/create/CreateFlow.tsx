@@ -17,16 +17,16 @@ import { players, countries, type Player, type CountryFilter } from '@/src/data/
 /* ─── Scene data with gradient colors ─────────── */
 
 const scenes = [
-  { id: 'tunnel_encounter', emoji: '🚶', nameKey: 'tunnelEncounter', gradient: 'from-gray-900 to-gray-600' },
-  { id: 'pitchside_quick', emoji: '⚽', nameKey: 'pitchsideQuick', gradient: 'from-emerald-700 to-green-500' },
-  { id: 'mixed_zone', emoji: '🎤', nameKey: 'mixedZone', gradient: 'from-violet-700 to-blue-500' },
-  { id: 'training_ground', emoji: '🏃', nameKey: 'trainingGround', gradient: 'from-green-600 to-lime-400' },
-  { id: 'hotel_encounter', emoji: '🏨', nameKey: 'hotelEncounter', gradient: 'from-amber-700 to-yellow-500' },
-  { id: 'stadium_exit', emoji: '🏟️', nameKey: 'stadiumExit', gradient: 'from-indigo-800 to-blue-600' },
-  { id: 'celebration_moment', emoji: '🎉', nameKey: 'celebrationMoment', gradient: 'from-red-600 to-amber-500' },
-  { id: 'autograph_line', emoji: '✍️', nameKey: 'autographLine', gradient: 'from-slate-600 to-blue-500' },
-  { id: 'warmup_pitch', emoji: '⚡', nameKey: 'warmupPitch', gradient: 'from-orange-500 to-rose-400' },
-  { id: 'airport_arrival', emoji: '✈️', nameKey: 'airportArrival', gradient: 'from-sky-700 to-cyan-500' },
+  { id: 'vip_tunnel', emoji: '🏟️', nameKey: 'vipTunnel', gradient: 'from-gray-900 to-gray-600' },
+  { id: 'locker_room', emoji: '🚪', nameKey: 'lockerRoom', gradient: 'from-indigo-800 to-blue-600' },
+  { id: 'corridor', emoji: '🚶', nameKey: 'corridor', gradient: 'from-slate-700 to-gray-500' },
+  { id: 'pitchside', emoji: '⚽', nameKey: 'pitchside', gradient: 'from-emerald-700 to-green-500' },
+  { id: 'press_area', emoji: '🎙️', nameKey: 'pressArea', gradient: 'from-violet-700 to-blue-500' },
+  { id: 'pitch_celebration', emoji: '🎉', nameKey: 'pitchCelebration', gradient: 'from-red-600 to-amber-500' },
+  { id: 'bench_area', emoji: '🪑', nameKey: 'benchArea', gradient: 'from-amber-700 to-yellow-500' },
+  { id: 'mixed_zone', emoji: '🎤', nameKey: 'mixedZone', gradient: 'from-orange-600 to-rose-400' },
+  { id: 'warmup', emoji: '🏃', nameKey: 'warmup', gradient: 'from-green-600 to-lime-400' },
+  { id: 'fan_zone', emoji: '🎪', nameKey: 'fanZone', gradient: 'from-sky-700 to-cyan-500' },
 ];
 
 /* ─── Popular player IDs (top 10 by rating) ───── */
@@ -197,12 +197,10 @@ export function CreateFlow() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           selfieBase64: selfieBase64Array[0],
-          selfieBase64Array,
           scene: selectedScene,
           playerName: selectedPlayer.name,
           playerCountry: selectedPlayer.country,
-          playerNumber: selectedPlayer.number,
-          teamColors: selectedPlayer.teamColors,
+          playerTeamColors: selectedPlayer.teamColors?.join(' and ') || '',
         }),
       });
       const data = await res.json();
@@ -437,7 +435,7 @@ export function CreateFlow() {
                   </p>
                   <p className="truncate text-[10px] text-text-muted">
                     {scenes.find((s) => s.id === selectedScene)?.emoji}{' '}
-                    {t(scenes.find((s) => s.id === selectedScene)?.nameKey || 'tunnelEncounter')}
+                    {t(scenes.find((s) => s.id === selectedScene)?.nameKey || 'vipTunnel')}
                     {selfieFiles.length > 1 && ` · ${selfieFiles.length} photos`}
                   </p>
                 </div>
