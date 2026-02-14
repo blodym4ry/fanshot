@@ -6,6 +6,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useCreateStore } from '@/src/stores/createStore';
 import { useCreditStore } from '@/src/stores/creditStore';
+import { useAuthStore } from '@/src/stores/authStore';
 import { LoadingScreen } from './LoadingScreen';
 import { ResultScreen } from './ResultScreen';
 import { ErrorScreen } from './ErrorScreen';
@@ -105,6 +106,7 @@ export function CreateFlow() {
   } = useCreateStore();
 
   const { credits, spendCredit } = useCreditStore();
+  const { user } = useAuthStore();
   const hasCredits = credits > 0;
   const hasSelfies = selfieFiles.length > 0;
 
@@ -215,6 +217,7 @@ export function CreateFlow() {
           playerName: selectedPlayer.name,
           playerCountry: selectedPlayer.country,
           playerTeamColors: selectedPlayer.teamColors?.join(' and ') || '',
+          userId: user?.id || 'anonymous',
         }),
       });
       const data = await res.json();
@@ -223,7 +226,7 @@ export function CreateFlow() {
     } catch {
       setError(t('errorConnection'));
     }
-  }, [selfieFiles, selectedPlayer, selectedScene, startGeneration, setResult, setError, spendCredit, credits, t]);
+  }, [selfieFiles, selectedPlayer, selectedScene, startGeneration, setResult, setError, spendCredit, credits, t, user?.id]);
 
   const canGenerate = hasSelfies && selectedPlayer && aiChecked && hasCredits;
 

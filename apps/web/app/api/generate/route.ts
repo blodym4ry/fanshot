@@ -1,5 +1,6 @@
 import { fal } from "@fal-ai/client";
 import { NextResponse } from "next/server";
+import { createAdminClient, isAdminConfigured } from "@/src/lib/supabase-admin";
 
 fal.config({ credentials: process.env.FAL_API_KEY });
 
@@ -332,6 +333,62 @@ export async function POST(req: Request) {
     console.log("[FanShot] 🎉 DONE — Total:", totalElapsed + "s, Cost: ~$0.19");
     console.log("[FanShot] 🖼️ Final:", finalImageUrl);
     console.log("[FanShot] ══════════════════════════════════════");
+
+    // ═══ SUPABASE STORAGE KAYIT (non-blocking) ═══
+    if (isAdminConfigured) {
+      try {
+        const supabase = createAdminClient();
+        const userId = (body.userId as string) || "anonymous";
+        const generationId = `gen_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+        console.log("[FanShot] 💾 Saving to Supabase Storage...");
+
+        // 1. Selfie → Supabase storage
+        const selfieBuffer = Buffer.from(selfieBase64.split(",")[1], "base64");
+        const selfiePath = `${userId}/${generationId}_selfie.jpg`;
+        await supabase.storage
+          .from("selfies")
+          .upload(selfiePath, selfieBuffer, {
+            contentType: "image/jpeg",
+            upsert: false,
+          });
+        console.log("[FanShot]    Selfie saved:", selfiePath);
+
+        // 2. Generated image → Supabase storage
+        const generatedResponse = await fetch(finalImageUrl);
+        if (generatedResponse.ok) {
+          const generatedBuffer = Buffer.from(await generatedResponse.arrayBuffer());
+          const generatedPath = `${userId}/${generationId}_result.png`;
+          await supabase.storage
+            .from("generated")
+            .upload(generatedPath, generatedBuffer, {
+              contentType: "image/png",
+              upsert: false,
+            });
+          console.log("[FanShot]    Generated saved:", generatedPath);
+
+          // 3. DB record
+          const dbResult = await supabase.from("generations").insert({
+            user_id: userId !== "anonymous" ? userId : null,
+            input_image_url: selfiePath,
+            output_image_url: generatedPath,
+            scene_type: scene,
+            player_style: playerName,
+            status: "completed",
+          });
+          if (dbResult.error) {
+            console.warn("[FanShot]    DB insert warning:", dbResult.error.message);
+          } else {
+            console.log("[FanShot]    DB record created");
+          }
+        }
+
+        console.log("[FanShot] 💾 Supabase save complete");
+      } catch (storageError: unknown) {
+        const errMsg = storageError instanceof Error ? storageError.message : String(storageError);
+        console.warn("[FanShot] ⚠️ Supabase save failed (non-blocking):", errMsg);
+      }
+    }
 
     return NextResponse.json({
       imageUrl: finalImageUrl,
