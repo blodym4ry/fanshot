@@ -287,15 +287,57 @@ export async function POST(req: Request) {
     const desc = result.data.description || "";
 
     console.log("[FanShot] ══════════════════════════════════════");
-    console.log("[FanShot] ✅ Done in", elapsed + "s");
+    console.log("[FanShot] ✅ Stage 1 complete in", elapsed + "s");
     console.log("[FanShot] 🖼️", imageUrl);
-    console.log("[FanShot] 💰 ~$0.15");
+    console.log("[FanShot] ══════════════════════════════════════");
+
+    // ═══ AŞAMA 2: FACE SWAP (Easel AI) ═══
+    console.log("[FanShot] ══════════════════════════════════════");
+    console.log("[FanShot] 🔄 Stage 2: Face Swap (Easel AI)");
+
+    let finalImageUrl = imageUrl; // fallback: aşama 1 görseli
+
+    try {
+      const swapResult = await fal.subscribe("easel-ai/advanced-face-swap", {
+        input: {
+          face_image_0: { url: selfieUrl },
+          gender_0: "male" as const,
+          target_image: { url: imageUrl },
+          workflow_type: "user_hair" as const,
+          upscale: true,
+        },
+        logs: true,
+        onQueueUpdate: (update) => {
+          if (update.status === "IN_PROGRESS") {
+            console.log("[FanShot] ⏳ Face swap in progress...", Math.round((Date.now() - t0) / 1000) + "s");
+          }
+        }
+      });
+
+      if (swapResult.data?.image?.url) {
+        finalImageUrl = swapResult.data.image.url;
+        console.log("[FanShot] ✅ Face swap complete:", finalImageUrl);
+      } else {
+        console.warn("[FanShot] ⚠️ Face swap returned no image, using Stage 1 result");
+      }
+    } catch (swapError: unknown) {
+      const errMsg = swapError instanceof Error ? swapError.message : String(swapError);
+      console.error("[FanShot] ⚠️ Face swap failed:", errMsg);
+      console.log("[FanShot] ↩️ Falling back to Stage 1 result");
+    }
+
+    const totalElapsed = Math.round((Date.now() - t0) / 1000);
+
+    console.log("[FanShot] ══════════════════════════════════════");
+    console.log("[FanShot] 🎉 DONE — Total:", totalElapsed + "s, Cost: ~$0.19");
+    console.log("[FanShot] 🖼️ Final:", finalImageUrl);
     console.log("[FanShot] ══════════════════════════════════════");
 
     return NextResponse.json({
-      imageUrl,
+      imageUrl: finalImageUrl,
+      stageOneUrl: imageUrl,
       description: desc,
-      processingTime: elapsed,
+      processingTime: totalElapsed,
       mock: false
     });
 
