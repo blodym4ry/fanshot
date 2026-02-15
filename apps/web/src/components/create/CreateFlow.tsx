@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useCreateStore } from '@/src/stores/createStore';
@@ -85,6 +85,7 @@ function groupByCountry(allPlayers: Player[]): Map<string, Player[]> {
 
 export function CreateFlow() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const t = useT('create');
   const tl = useT('legal');
 
@@ -100,7 +101,7 @@ export function CreateFlow() {
     setPlayer,
     setScene,
     startGeneration,
-    setResult,
+    setSubmitted,
     setError,
     reset,
   } = useCreateStore();
@@ -197,18 +198,22 @@ export function CreateFlow() {
   };
   const openFilePicker = () => fileInputRef.current?.click();
 
-  /* ── Generate handler ────────────────────────── */
+  /* ── Generate handler (fire-and-forget: show submitted screen immediately) ── */
   const handleGenerate = useCallback(async () => {
     if (selfieFiles.length === 0 || !selectedPlayer) return;
     const isFree = credits === 1;
     if (!spendCredit()) return;
     setAiChecked(false);
     startGeneration(isFree);
+
     try {
       // Compress images client-side: max 1024px, quality 0.8 → ~200-500KB each
-      // This prevents Vercel's 4.5MB body limit (FUNCTION_PAYLOAD_TOO_LARGE)
       const selfieBase64Array = await compressImages(selfieFiles, 1024, 0.8);
-      const res = await fetch('/api/generate', {
+
+      // Fire the API call — show submitted screen immediately
+      setSubmitted();
+
+      fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -219,14 +224,22 @@ export function CreateFlow() {
           playerTeamColors: selectedPlayer.teamColors?.join(' and ') || '',
           userId: user?.id || 'anonymous',
         }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || t('errorGenerate')); return; }
-      setResult(data.imageUrl);
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.imageUrl) {
+            console.log('[FanShot] ✅ Generation complete');
+          } else {
+            console.warn('[FanShot] ⚠️ Generation returned no image:', data.error);
+          }
+        })
+        .catch((err) => {
+          console.error('[FanShot] ❌ Generation error:', err);
+        });
     } catch {
       setError(t('errorConnection'));
     }
-  }, [selfieFiles, selectedPlayer, selectedScene, startGeneration, setResult, setError, spendCredit, credits, t, user?.id]);
+  }, [selfieFiles, selectedPlayer, selectedScene, startGeneration, setSubmitted, setError, spendCredit, credits, t, user?.id]);
 
   const canGenerate = hasSelfies && selectedPlayer && aiChecked && hasCredits;
 
@@ -237,8 +250,38 @@ export function CreateFlow() {
     return '';
   };
 
-  /* ═══ Render: Loading / Success / Error ════════ */
+  /* ═══ Render: Loading / Submitted / Success / Error ════════ */
   if (generationStatus === 'loading') return <LoadingScreen isComplete={false} />;
+  if (generationStatus === 'submitted') return (
+    <div className="flex min-h-[70vh] flex-col items-center justify-center gap-6 px-4 text-center animate-fade-step">
+      <div className="relative flex h-24 w-24 items-center justify-center">
+        <div className="absolute inset-0 animate-spin-slow rounded-full border-[3px] border-transparent border-t-gold border-r-gold/30" />
+        <span className="text-5xl">⚽</span>
+      </div>
+      <div>
+        <h2 className="font-oswald text-xl font-bold uppercase tracking-wider text-text-primary">
+          {t('submittedTitle')}
+        </h2>
+        <p className="mt-2 max-w-[320px] text-sm leading-relaxed text-text-secondary">
+          {t('submittedDesc')}
+        </p>
+      </div>
+      <div className="flex gap-3">
+        <button
+          onClick={() => router.push('/gallery')}
+          className="rounded-xl bg-gradient-to-r from-gold to-amber-500 px-6 py-3 font-oswald text-sm font-bold uppercase tracking-wider text-bg-primary shadow-lg shadow-gold/20 transition-all hover:shadow-gold/40"
+        >
+          {t('goToGallery')}
+        </button>
+        <button
+          onClick={() => reset()}
+          className="rounded-xl border border-white/[0.1] bg-bg-card px-6 py-3 font-oswald text-sm font-medium uppercase tracking-wider text-text-secondary transition-all hover:border-white/[0.2]"
+        >
+          {t('createAnother')}
+        </button>
+      </div>
+    </div>
+  );
   if (generationStatus === 'success') return <div className="animate-fade-step"><ResultScreen /></div>;
   if (generationStatus === 'error') return <div className="animate-fade-step"><ErrorScreen /></div>;
 

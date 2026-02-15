@@ -13,7 +13,7 @@ export interface CreditState {
 }
 
 export const useCreditStore = create<CreditState>((set, get) => ({
-  credits: 1, // 1 free credit by default
+  credits: 0, // start at 0 — free credit comes from Supabase on first signup only
   isLoading: false,
 
   setCredits: (amount: number) => set({ credits: amount }),
@@ -29,12 +29,14 @@ export const useCreditStore = create<CreditState>((set, get) => ({
     return true;
   },
 
-  /** Fetch credits from Supabase. Falls back to local default if offline. */
+  /** Fetch credits from Supabase. Only gives free credit on first signup. */
   fetchCredits: async () => {
     set({ isLoading: true });
     try {
       if (!isSupabaseConfigured) {
+        // Dev mode — give 1 free credit for testing
         await new Promise((r) => setTimeout(r, 300));
+        set({ credits: 1 });
         return;
       }
 
@@ -52,6 +54,18 @@ export const useCreditStore = create<CreditState>((set, get) => ({
         .eq('id', user.id)
         .single();
 
+      if (error && error.code === 'PGRST116') {
+        // No row found — first signup. Create row with 1 free credit.
+        console.log('[Credits] First signup — granting 1 free credit');
+        await supabase.from('users').insert({
+          id: user.id,
+          free_credits: 1,
+          paid_credits: 0,
+        });
+        set({ credits: 1 });
+        return;
+      }
+
       if (error) {
         console.error('[Credits] Fetch error:', error.message);
         return;
@@ -61,7 +75,7 @@ export const useCreditStore = create<CreditState>((set, get) => ({
         set({ credits: (data.free_credits ?? 0) + (data.paid_credits ?? 0) });
       }
     } catch {
-      // offline — keep default
+      // offline — keep at 0
     } finally {
       set({ isLoading: false });
     }

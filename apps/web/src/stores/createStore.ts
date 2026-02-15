@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Player } from '@/src/data/players';
 
-export type GenerationStatus = 'idle' | 'loading' | 'success' | 'error';
+export type GenerationStatus = 'idle' | 'loading' | 'submitted' | 'success' | 'error';
 
 export interface CreateState {
   /* selfies (1-5 photos) */
@@ -33,6 +33,7 @@ export interface CreateState {
 
   /* actions – generation */
   startGeneration: (isFree: boolean) => void;
+  setSubmitted: () => void;
   setResult: (imageUrl: string) => void;
   setError: (message: string) => void;
   resetGeneration: () => void;
@@ -47,7 +48,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
   selfieFiles: [],
   selfiePreviews: [],
   selectedPlayer: null,
-  selectedScene: 'tunnel_encounter',
+  selectedScene: 'vip_tunnel',
   generationStatus: 'idle',
   generatedImageUrl: null,
   errorMessage: null,
@@ -98,6 +99,9 @@ export const useCreateStore = create<CreateState>((set, get) => ({
       wasFreeGeneration: isFree,
     }),
 
+  setSubmitted: () =>
+    set({ generationStatus: 'submitted' }),
+
   setResult: (imageUrl: string) =>
     set({
       generationStatus: 'success',
@@ -126,7 +130,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
       selfieFiles: [],
       selfiePreviews: [],
       selectedPlayer: null,
-      selectedScene: 'tunnel_encounter',
+      selectedScene: 'vip_tunnel',
       generationStatus: 'idle',
       generatedImageUrl: null,
       errorMessage: null,

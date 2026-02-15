@@ -8,33 +8,34 @@ import { showToast } from '@/src/stores/toastStore';
 import { GoldButton } from '../ui/GoldButton';
 import { useT } from '@/src/lib/i18n';
 
-/* ── Scene / Style label maps ──────────────────────── */
+/* ── Scene label map (current + legacy backward-compat) ── */
 const sceneMap: Record<string, { emoji: string; nameKey: string }> = {
-  tunnel_encounter: { emoji: '🚶', nameKey: 'tunnelEncounter' },
-  pitchside_quick: { emoji: '⚽', nameKey: 'pitchsideQuick' },
+  /* Current scenes */
+  vip_tunnel: { emoji: '🏟️', nameKey: 'vipTunnel' },
+  locker_room: { emoji: '🚪', nameKey: 'lockerRoom' },
+  corridor: { emoji: '🚶', nameKey: 'corridor' },
+  pitchside: { emoji: '⚽', nameKey: 'pitchside' },
+  press_area: { emoji: '🎙️', nameKey: 'pressArea' },
+  pitch_celebration: { emoji: '🎉', nameKey: 'pitchCelebration' },
+  bench_area: { emoji: '🪑', nameKey: 'benchArea' },
   mixed_zone: { emoji: '🎤', nameKey: 'mixedZone' },
-  training_ground: { emoji: '🏃', nameKey: 'trainingGround' },
-  hotel_encounter: { emoji: '🏨', nameKey: 'hotelEncounter' },
-  stadium_exit: { emoji: '🏟️', nameKey: 'stadiumExit' },
-  celebration_moment: { emoji: '🎉', nameKey: 'celebrationMoment' },
-  autograph_line: { emoji: '✍️', nameKey: 'autographLine' },
-  warmup_pitch: { emoji: '⚡', nameKey: 'warmupPitch' },
-  airport_arrival: { emoji: '✈️', nameKey: 'airportArrival' },
-  /* legacy scene IDs for backward compat */
-  corner_flag: { emoji: '⚽', nameKey: 'pitchsideQuick' },
-  celebration: { emoji: '🎉', nameKey: 'celebrationMoment' },
-  locker_room: { emoji: '🎤', nameKey: 'mixedZone' },
-  tunnel: { emoji: '🚶', nameKey: 'tunnelEncounter' },
-  trophy: { emoji: '🎉', nameKey: 'celebrationMoment' },
-  press_conference: { emoji: '✍️', nameKey: 'autographLine' },
-};
-
-const styleMap: Record<string, { emoji: string; nameKey: string }> = {
-  striker: { emoji: '⚡', nameKey: 'striker' },
-  playmaker: { emoji: '🎯', nameKey: 'playmaker' },
-  goalkeeper: { emoji: '🧤', nameKey: 'goalkeeper' },
-  defender: { emoji: '🛡️', nameKey: 'defender' },
-  young_talent: { emoji: '🌟', nameKey: 'youngTalent' },
+  warmup: { emoji: '🏃', nameKey: 'warmup' },
+  fan_zone: { emoji: '🎪', nameKey: 'fanZone' },
+  /* Legacy scene IDs for backward compat */
+  tunnel_encounter: { emoji: '🏟️', nameKey: 'vipTunnel' },
+  pitchside_quick: { emoji: '⚽', nameKey: 'pitchside' },
+  training_ground: { emoji: '🏃', nameKey: 'warmup' },
+  hotel_encounter: { emoji: '🚪', nameKey: 'lockerRoom' },
+  stadium_exit: { emoji: '🏟️', nameKey: 'vipTunnel' },
+  celebration_moment: { emoji: '🎉', nameKey: 'pitchCelebration' },
+  autograph_line: { emoji: '🪑', nameKey: 'benchArea' },
+  warmup_pitch: { emoji: '🏃', nameKey: 'warmup' },
+  airport_arrival: { emoji: '🎪', nameKey: 'fanZone' },
+  corner_flag: { emoji: '⚽', nameKey: 'pitchside' },
+  celebration: { emoji: '🎉', nameKey: 'pitchCelebration' },
+  tunnel: { emoji: '🏟️', nameKey: 'vipTunnel' },
+  trophy: { emoji: '🎉', nameKey: 'pitchCelebration' },
+  press_conference: { emoji: '🎙️', nameKey: 'pressArea' },
 };
 
 /* ── Photo Detail Modal ────────────────────────────── */
@@ -53,7 +54,7 @@ function PhotoDetailModal({
   const ts = useT('share');
 
   const scene = sceneMap[generation.sceneType];
-  const style = styleMap[generation.playerStyle];
+  const playerName = generation.playerStyle;
 
   const handleDownload = useCallback(async () => {
     try {
@@ -147,12 +148,12 @@ function PhotoDetailModal({
                 </div>
               </div>
             )}
-            {style && (
+            {playerName && (
               <div className="flex items-center gap-2 rounded-lg bg-white/[0.04] px-3 py-1.5">
-                <span className="text-sm">{style.emoji}</span>
+                <span className="text-sm">⚽</span>
                 <div>
-                  <p className="text-[9px] uppercase tracking-wider text-text-muted">{tg('style')}</p>
-                  <p className="font-oswald text-xs font-medium text-text-primary">{tc(style.nameKey)}</p>
+                  <p className="text-[9px] uppercase tracking-wider text-text-muted">{tg('scene')}</p>
+                  <p className="font-oswald text-xs font-medium text-text-primary">{playerName}</p>
                 </div>
               </div>
             )}

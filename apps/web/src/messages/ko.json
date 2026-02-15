@@ -184,7 +184,11 @@
     "glassesYes": "Glasses",
     "glassesNo": "None",
     "clothing": "Outfit",
-    "clothingPlaceholder": "e.g. Black t-shirt, jeans"
+    "clothingPlaceholder": "e.g. Black t-shirt, jeans",
+    "submittedTitle": "Your Photo is Being Created!",
+    "submittedDesc": "It'll be ready in 1-3 minutes. Check your Gallery to see it when it's done.",
+    "goToGallery": "Go to Gallery",
+    "createAnother": "Create Another"
   },
   "credits": {
     "title": "Credit Packages",

@@ -189,7 +189,11 @@
     "glassesYes": "Gözlük Var",
     "glassesNo": "Yok",
     "clothing": "Kıyafet",
-    "clothingPlaceholder": "Ör: Siyah tişört, kot pantolon"
+    "clothingPlaceholder": "Ör: Siyah tişört, kot pantolon",
+    "submittedTitle": "Fotoğrafın Oluşturuluyor!",
+    "submittedDesc": "1-3 dakika içinde hazır olacak. Hazır olduğunda Galerinden kontrol edebilirsin.",
+    "goToGallery": "Galeriye Git",
+    "createAnother": "Yeni Oluştur"
   },
   "credits": {
     "title": "Kredi Paketleri",
