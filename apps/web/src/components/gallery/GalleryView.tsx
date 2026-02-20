@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { useGalleryStore, Generation } from '@/src/stores/galleryStore';
 import { useCreditStore } from '@/src/stores/creditStore';
@@ -225,11 +225,18 @@ function PhotoDetailModal({
 
 /* ── Main Gallery View ─────────────────────────────── */
 export function GalleryView() {
-  const { generations, removeGeneration } = useGalleryStore();
+  const { generations, removeGeneration, fetchGenerations } = useGalleryStore();
   const { credits } = useCreditStore();
   const [selectedGen, setSelectedGen] = useState<Generation | null>(null);
   const tg = useT('gallery');
   const tc = useT('create');
+
+  // Refresh on mount + poll every 10s for new generations
+  useEffect(() => {
+    fetchGenerations();
+    const interval = setInterval(fetchGenerations, 10000);
+    return () => clearInterval(interval);
+  }, [fetchGenerations]);
 
   const showWatermarkOverlay = credits === 0;
 

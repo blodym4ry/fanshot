@@ -298,14 +298,16 @@ export async function POST(req: Request) {
 
     let finalImageUrl = imageUrl; // fallback: aşama 1 görseli
 
+    const FACE_SWAP_TIMEOUT = 120000; // 120 seconds
+
     try {
-      const swapResult = await fal.subscribe("easel-ai/advanced-face-swap", {
+      const swapPromise = fal.subscribe("easel-ai/advanced-face-swap", {
         input: {
           face_image_0: { url: selfieUrl },
           gender_0: "male" as const,
           target_image: { url: imageUrl },
           workflow_type: "user_hair" as const,
-          upscale: true,
+          upscale: false,
         },
         logs: true,
         onQueueUpdate: (update) => {
@@ -314,6 +316,12 @@ export async function POST(req: Request) {
           }
         }
       });
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Face swap timeout")), FACE_SWAP_TIMEOUT)
+      );
+
+      const swapResult = await Promise.race([swapPromise, timeoutPromise]);
 
       if (swapResult.data?.image?.url) {
         finalImageUrl = swapResult.data.image.url;
@@ -367,11 +375,18 @@ export async function POST(req: Request) {
             });
           console.log("[FanShot]    Generated saved:", generatedPath);
 
-          // 3. DB record
+          // 3. Get public URL for the generated image
+          const { data: publicUrlData } = supabase.storage
+            .from("generated")
+            .getPublicUrl(generatedPath);
+          const publicUrl = publicUrlData.publicUrl;
+          console.log("[FanShot]    Public URL:", publicUrl);
+
+          // 4. DB record — store full public URL, not just path
           const dbResult = await supabase.from("generations").insert({
             user_id: userId !== "anonymous" ? userId : null,
             input_image_url: selfiePath,
-            output_image_url: generatedPath,
+            output_image_url: publicUrl,
             scene_type: scene,
             player_style: playerName,
             status: "completed",

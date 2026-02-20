@@ -63,14 +63,22 @@ export const useGalleryStore = create<GalleryState>((set) => ({
       }
 
       if (data) {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
         set({
-          generations: data.map((row) => ({
-            id: row.id,
-            outputImageUrl: row.output_image_url || '',
-            sceneType: row.scene_type,
-            playerStyle: row.player_style,
-            createdAt: row.created_at,
-          })),
+          generations: data.map((row) => {
+            let imageUrl = row.output_image_url || '';
+            // Legacy fix: convert storage paths to full public URLs
+            if (imageUrl && !imageUrl.startsWith('http')) {
+              imageUrl = `${supabaseUrl}/storage/v1/object/public/generated/${imageUrl}`;
+            }
+            return {
+              id: row.id,
+              outputImageUrl: imageUrl,
+              sceneType: row.scene_type,
+              playerStyle: row.player_style,
+              createdAt: row.created_at,
+            };
+          }),
         });
       }
     } catch {
