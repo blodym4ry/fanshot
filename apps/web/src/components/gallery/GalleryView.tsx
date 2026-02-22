@@ -231,10 +231,10 @@ export function GalleryView() {
   const tg = useT('gallery');
   const tc = useT('create');
 
-  // Refresh on mount + poll every 10s for new generations
+  // Refresh on mount + poll every 15s for new generations
   useEffect(() => {
     fetchGenerations();
-    const interval = setInterval(fetchGenerations, 10000);
+    const interval = setInterval(fetchGenerations, 15000);
     return () => clearInterval(interval);
   }, [fetchGenerations]);
 

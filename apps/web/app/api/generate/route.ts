@@ -154,8 +154,12 @@ PERSON 1 — THE FAN (from uploaded reference photo):
 - Extract and preserve this person's COMPLETE facial identity from the uploaded reference image: exact face shape, eye spacing, eye shape and color, nose bridge and tip, lip shape and thickness, jawline contour, cheekbone structure, skin tone and texture, facial hair if any, ear shape, and all natural proportions
 - Their face must be 100% identical to the uploaded reference — the same exact unique person, NOT a similar-looking person or generic face
 - Do NOT copy the pose, clothing, background, or camera angle from the reference photo — only use it for facial identity
-- Dress them in casual fan clothing: dark colored hoodie or t-shirt, jeans, and sneakers. Regular everyday appearance
+- Dress them as an enthusiastic fan: wearing the ${playerCountry} national team jersey/replica kit in ${teamColors || 'the team colors'}. The fan jersey should look like an authentic replica/fan version — slightly looser fit than the player's match jersey, possibly with some wrinkles. They can wear jeans or dark pants with the jersey, and sneakers. They look like a real dedicated fan who came to support their team
 - Expression: genuinely excited, happy, slightly starstruck but naturally smiling
+- The fan's face must be clearly visible, well-lit, and take up a significant portion of the frame
+- Face angle: front-facing or at most 15 degrees turned — NOT profile view
+- The fan's face should be at least 15-20% of the total image area for optimal face-swap quality
+- NO sunglasses, hats covering forehead, or anything obscuring facial features
 
 PERSON 2 — THE FOOTBALLER:
 - ${playerDesc}
@@ -186,6 +190,20 @@ CRITICAL IDENTITY CONSTRAINTS:
 - Both people must appear to genuinely occupy the same physical 3D space with coherent perspective, scale, and consistent lighting/shadows between them
 - Natural human body proportions — correct number of fingers (5 per hand), no extra limbs, proper arm length and joint positions
 - The photograph must be completely indistinguishable from a real iPhone photo posted on Instagram
+
+CRITICAL REALISM — THIS MUST LOOK LIKE A REAL FAN PHOTO, NOT AI:
+- This is NOT a professional photoshoot. It's a quick, casual fan photo taken by a friend's smartphone
+- Slightly imperfect framing — one person might be slightly cut off, or the horizon slightly tilted 1-3 degrees
+- Natural motion artifacts — very subtle hand-shake blur on background elements
+- Real smartphone compression artifacts and slight JPEG noise, especially in darker areas
+- Natural red-eye possibility from phone flash in darker environments
+- Slight color inconsistency typical of smartphone auto white-balance
+- The photo should look like it was taken in 3 seconds and posted to Instagram without editing
+- Background people/objects should have natural smartphone bokeh, not perfectly smooth gaussian blur
+- Clothing should have natural wrinkles, not perfectly pressed
+- Sweat, flushed cheeks, messy hair from the excitement of the match
+- The fan should look genuinely excited and slightly nervous, NOT model-posing
+- The overall feel must be "authentic unedited iPhone photo posted to Instagram stories" — NOT "AI generated portrait"
 
 AVOID: identity drift on either person, generic AI-generated faces, beauty filter smoothing, plastic or waxy skin texture, symmetrical perfect composition, HDR tonemapping glow, oversaturated colors, any watermarks or text overlays on the image, any logos or branding burned into the image, anatomy errors (extra fingers or limbs or distorted joints), pasted/floating/cutout appearance of either person, mismatched lighting direction or color temperature between the two people, halo or fringing edges around either person, uncanny valley dead eyes, teeth that look too perfect or uniform, hair that looks like a wig or helmet.`;
 }
